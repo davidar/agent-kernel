@@ -1,0 +1,12 @@
+# Minimal container for TTY integration tests.
+# Only needs bash + tmux (no Python venv, no CLIs, no heavy packages).
+FROM ubuntu:24.04
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash \
+    coreutils \
+    tmux \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
+ENV TERM=xterm-256color
+CMD ["sleep", "infinity"]

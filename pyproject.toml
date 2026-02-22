@@ -1,0 +1,75 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[project]
+name = "agent-kernel"
+version = "0.1.0"
+description = "Portable runtime for persistent Claude agents"
+requires-python = ">=3.10"
+dependencies = [
+    "claude-agent-sdk>=0.1.39",
+    "typing_extensions>=4.0.0",
+    "watchfiles>=1.0.0",
+]
+license = {text = "MIT"}
+readme = "README.md"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+]
+
+[project.urls]
+Repository = "https://github.com/davidar/agent-kernel"
+
+[project.scripts]
+agent-kernel = "src.cli:main"
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.5.1",
+    "pyright>=1.1.0",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "pytest-xdist>=3.8.0",
+    "ruff>=0.8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = ["network: tests that require network access"]
+
+[tool.pyright]
+include = ["src"]
+pythonVersion = "3.10"
+typeCheckingMode = "basic"
+# Strict checks enabled - catch runtime errors at type-check time
+reportUndefinedVariable = "error"
+reportUnusedImport = "warning"
+reportMissingImports = "error"
+reportOptionalMemberAccess = "error"
+reportAttributeAccessIssue = "error"
+reportOptionalSubscript = "error"
+reportArgumentType = "error"
+
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes (undefined names, unused imports, etc.)
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line too long (handled by formatter)
+]
