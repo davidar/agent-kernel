@@ -1,6 +1,11 @@
 """Tests for the terminal multiplexer (src/tty.py)."""
 
+import asyncio
+import json
+
 import pytest
+
+from src.tty import MAX_TTYS, TTY, TTYManager, _is_tmux_key
 
 
 @pytest.fixture
@@ -20,8 +25,6 @@ def tty_env(sessions_dir):
 @pytest.fixture
 async def tty_manager(tty_env):
     """Create a TTYManager that uses the temp dir (no capture loop)."""
-    from src.tty import TTYManager
-
     mgr = TTYManager(sessions_dir=tty_env)
     # Don't start the capture loop for unit tests
     mgr.sessions_dir.mkdir(parents=True, exist_ok=True)
@@ -33,8 +36,6 @@ class TestTTY:
     """Test TTY class basics."""
 
     def test_tty_init(self, sessions_dir):
-        from src.tty import TTY
-
         tty = TTY(0, sessions_dir)
         assert tty.id == 0
         assert tty.tmux_name == "tty_0"
@@ -51,21 +52,15 @@ class TestTTY:
         assert tty.exit_code is None
 
     def test_get_new_lines_empty(self, sessions_dir):
-        from src.tty import TTY
-
         tty = TTY(0, sessions_dir)
         assert tty.get_new_lines() == []
 
     def test_get_new_lines_with_content(self, sessions_dir):
-        from src.tty import TTY
-
         tty = TTY(0, sessions_dir)
         tty.previous_lines = ["line1", "line2", "line3"]
         assert tty.get_new_lines() == ["line1", "line2", "line3"]
 
     def test_mark_seen(self, sessions_dir):
-        from src.tty import TTY
-
         tty = TTY(0, sessions_dir)
         tty.previous_lines = ["line1", "line2", "line3"]
         tty.mark_seen()
@@ -73,8 +68,6 @@ class TestTTY:
         assert tty.get_new_lines() == []
 
     def test_new_lines_after_mark(self, sessions_dir):
-        from src.tty import TTY
-
         tty = TTY(0, sessions_dir)
         tty.previous_lines = ["line1", "line2"]
         tty.mark_seen()
@@ -82,8 +75,6 @@ class TestTTY:
         assert tty.get_new_lines() == ["line3", "line4"]
 
     def test_screen_clear_resets_hwm(self, sessions_dir):
-        from src.tty import TTY
-
         tty = TTY(0, sessions_dir)
         tty.previous_lines = ["line1", "line2", "line3"]
         tty.mark_seen()
@@ -102,8 +93,6 @@ class TestTTYManager:
 
     def test_create_tty_direct(self, tty_manager, sessions_dir):
         """Inserting a TTY directly works."""
-        from src.tty import TTY
-
         tty = TTY(0, sessions_dir)
         tty_manager.ttys[0] = tty
         assert 0 in tty_manager.ttys
@@ -111,8 +100,6 @@ class TestTTYManager:
 
     async def test_max_ttys_enforced(self, tty_env):
         """Creating more than MAX_TTYS TTYs raises."""
-        from src.tty import MAX_TTYS, TTY, TTYManager
-
         mgr = TTYManager(sessions_dir=tty_env)
         mgr.sessions_dir.mkdir(parents=True, exist_ok=True)
 
@@ -128,8 +115,6 @@ class TestTTYManager:
 
     def test_close_tty(self, tty_manager, sessions_dir):
         """Closing a TTY removes it from the manager."""
-        from src.tty import TTY
-
         tty = TTY(0, sessions_dir)
         tty_manager.ttys[0] = tty
         # close_tty is async but we only test the dict removal here
@@ -146,14 +131,10 @@ class TestTTYStatusSummary:
     """Test TTY diff formatting and status summaries."""
 
     def test_no_changes_returns_empty(self, sessions_dir):
-        from src.tty import TTYManager
-
         mgr = TTYManager(sessions_dir=sessions_dir)
         assert mgr.build_tty_status_summary() == ""
 
     def test_no_changes_with_ttys_shows_no_change(self, sessions_dir):
-        from src.tty import TTY, TTYManager
-
         mgr = TTYManager(sessions_dir=sessions_dir)
         tty = TTY(0, sessions_dir)
         tty.previous_lines = ["line1"]
@@ -163,8 +144,6 @@ class TestTTYStatusSummary:
         assert "no change" in summary
 
     def test_short_output_inline(self, sessions_dir):
-        from src.tty import TTY, TTYManager
-
         mgr = TTYManager(sessions_dir=sessions_dir)
         tty = TTY(0, sessions_dir)
         tty.previous_lines = ["$ echo hello", "hello", "$"]
@@ -178,8 +157,6 @@ class TestTTYStatusSummary:
         assert "hello" in summary
 
     def test_long_output_elided(self, sessions_dir):
-        from src.tty import TTY, TTYManager
-
         mgr = TTYManager(sessions_dir=sessions_dir)
         tty = TTY(0, sessions_dir)
         tty.previous_lines = [f"line_{i}" for i in range(50)]
@@ -197,8 +174,6 @@ class TestTTYStatusSummary:
         assert "line_25" not in summary
 
     def test_process_exited_reported(self, sessions_dir):
-        from src.tty import TTY, TTYManager
-
         mgr = TTYManager(sessions_dir=sessions_dir)
         tty = TTY(0, sessions_dir)
         tty.process_dead = True
@@ -211,8 +186,6 @@ class TestTTYStatusSummary:
         assert "error occurred" in summary
 
     def test_process_exited_no_output(self, sessions_dir):
-        from src.tty import TTY, TTYManager
-
         mgr = TTYManager(sessions_dir=sessions_dir)
         tty = TTY(0, sessions_dir)
         tty.process_dead = True
@@ -225,8 +198,6 @@ class TestTTYStatusSummary:
         assert "no new output" in summary
 
     def test_mark_seen_after_summary(self, sessions_dir):
-        from src.tty import TTY, TTYManager
-
         mgr = TTYManager(sessions_dir=sessions_dir)
         tty = TTY(0, sessions_dir)
         tty.previous_lines = ["line1", "line2"]
@@ -241,8 +212,6 @@ class TestTTYStatusSummary:
         assert "no change" in summary2
 
     def test_multiple_ttys(self, sessions_dir):
-        from src.tty import TTY, TTYManager
-
         mgr = TTYManager(sessions_dir=sessions_dir)
 
         tty0 = TTY(0, sessions_dir)
@@ -270,14 +239,10 @@ class TestHasUnseenChanges:
     """Test has_unseen_changes() method."""
 
     def test_no_unseen_empty(self, sessions_dir):
-        from src.tty import TTYManager
-
         mgr = TTYManager(sessions_dir=sessions_dir)
         assert mgr.has_unseen_changes() is False
 
     def test_no_unseen_all_seen(self, sessions_dir):
-        from src.tty import TTY, TTYManager
-
         mgr = TTYManager(sessions_dir=sessions_dir)
         tty = TTY(0, sessions_dir)
         tty.previous_lines = ["line1"]
@@ -286,8 +251,6 @@ class TestHasUnseenChanges:
         assert mgr.has_unseen_changes() is False
 
     def test_has_unseen(self, sessions_dir):
-        from src.tty import TTY, TTYManager
-
         mgr = TTYManager(sessions_dir=sessions_dir)
         tty = TTY(0, sessions_dir)
         tty.previous_lines = ["line1", "line2"]
@@ -296,8 +259,6 @@ class TestHasUnseenChanges:
         assert mgr.has_unseen_changes() is True
 
     def test_dead_tty_unseen(self, sessions_dir):
-        from src.tty import TTY, TTYManager
-
         mgr = TTYManager(sessions_dir=sessions_dir)
         tty = TTY(0, sessions_dir)
         tty.previous_lines = ["output"]
@@ -308,8 +269,6 @@ class TestHasUnseenChanges:
         assert mgr.has_unseen_changes() is True
 
     def test_dead_tty_all_seen(self, sessions_dir):
-        from src.tty import TTY, TTYManager
-
         mgr = TTYManager(sessions_dir=sessions_dir)
         tty = TTY(0, sessions_dir)
         tty.previous_lines = ["output"]
@@ -324,8 +283,6 @@ class TestArchive:
     """Test TTY archiving."""
 
     def test_archive_tty(self, sessions_dir):
-        from src.tty import TTY, TTYManager
-
         archive_dir = sessions_dir.parent / "archive"
         mgr = TTYManager(sessions_dir=sessions_dir, archive_dir=archive_dir)
         tty = TTY(0, sessions_dir)
@@ -354,10 +311,6 @@ class TestRegistry:
     """Test TTY registry."""
 
     def test_save_and_load_registry(self, sessions_dir):
-        import json
-
-        from src.tty import TTY, TTYManager
-
         mgr = TTYManager(sessions_dir=sessions_dir)
         tty = TTY(0, sessions_dir)
         tty.command = "bash"
@@ -374,8 +327,6 @@ class TestRegistry:
         assert data["tty_0"]["status"] == "idle"
 
     def test_load_empty_registry(self, sessions_dir):
-        from src.tty import TTYManager
-
         mgr = TTYManager(sessions_dir=sessions_dir)
         assert mgr._load_registry() == {}
 
@@ -384,8 +335,6 @@ class TestWriteStatus:
     """Test status file writing."""
 
     def test_write_idle_status(self, sessions_dir):
-        from src.tty import TTY, TTYManager
-
         mgr = TTYManager(sessions_dir=sessions_dir)
         tty = TTY(0, sessions_dir)
         tty.tty_dir.mkdir(parents=True)
@@ -394,8 +343,6 @@ class TestWriteStatus:
         assert tty.status_file.read_text().strip() == "idle"
 
     def test_write_exited_status(self, sessions_dir):
-        from src.tty import TTY, TTYManager
-
         mgr = TTYManager(sessions_dir=sessions_dir)
         tty = TTY(0, sessions_dir)
         tty.tty_dir.mkdir(parents=True)
@@ -410,16 +357,12 @@ class TestTTYLabel:
     """Test auto-naming via pane_current_command."""
 
     def test_default_label_is_command(self, sessions_dir):
-        from src.tty import TTY, TTYManager
-
         mgr = TTYManager(sessions_dir=sessions_dir)
         tty = TTY(0, sessions_dir)
         tty.command = "bash"
         assert mgr._tty_label(tty) == "bash"
 
     def test_current_command_overrides(self, sessions_dir):
-        from src.tty import TTY, TTYManager
-
         mgr = TTYManager(sessions_dir=sessions_dir)
         tty = TTY(0, sessions_dir)
         tty.command = "bash"
@@ -427,8 +370,6 @@ class TestTTYLabel:
         assert mgr._tty_label(tty) == "vim"
 
     def test_bash_current_command_falls_through(self, sessions_dir):
-        from src.tty import TTY, TTYManager
-
         mgr = TTYManager(sessions_dir=sessions_dir)
         tty = TTY(0, sessions_dir)
         tty.command = "python3"
@@ -437,8 +378,6 @@ class TestTTYLabel:
         assert mgr._tty_label(tty) == "bash"
 
     def test_label_in_diff(self, sessions_dir):
-        from src.tty import TTY, TTYManager
-
         mgr = TTYManager(sessions_dir=sessions_dir)
         tty = TTY(0, sessions_dir)
         tty.command = "bash"
@@ -453,8 +392,6 @@ class TestTmuxKeyDetection:
     """Test tmux key name detection."""
 
     def test_named_keys(self):
-        from src.tty import _is_tmux_key
-
         assert _is_tmux_key("Enter") is True
         assert _is_tmux_key("Escape") is True
         assert _is_tmux_key("Tab") is True
@@ -465,22 +402,16 @@ class TestTmuxKeyDetection:
         assert _is_tmux_key("F12") is True
 
     def test_ctrl_combos(self):
-        from src.tty import _is_tmux_key
-
         assert _is_tmux_key("C-c") is True
         assert _is_tmux_key("C-d") is True
         assert _is_tmux_key("C-z") is True
         assert _is_tmux_key("C-\\") is True
 
     def test_alt_combos(self):
-        from src.tty import _is_tmux_key
-
         assert _is_tmux_key("M-a") is True
         assert _is_tmux_key("M-x") is True
 
     def test_literal_text(self):
-        from src.tty import _is_tmux_key
-
         assert _is_tmux_key("echo hello") is False
         assert _is_tmux_key("ls -la") is False
         assert _is_tmux_key("") is False
@@ -491,43 +422,31 @@ class TestBufferShift:
     """Test sliding buffer detection for full tmux scrollback."""
 
     def test_basic_shift(self, sessions_dir):
-        from src.tty import TTYManager
-
         # Buffer was [A, B, C, D, E], now [C, D, E, F, G] (2 lines fell off)
         old = ["A", "B", "C", "D", "E"]
         new = ["C", "D", "E", "F", "G"]
         assert TTYManager._detect_buffer_shift(old, new) == 2
 
     def test_no_shift(self, sessions_dir):
-        from src.tty import TTYManager
-
         # Same content
         lines = ["A", "B", "C"]
         assert TTYManager._detect_buffer_shift(lines, lines) == 0
 
     def test_single_line_shift(self, sessions_dir):
-        from src.tty import TTYManager
-
         old = ["A", "B", "C", "D"]
         new = ["B", "C", "D", "E"]
         assert TTYManager._detect_buffer_shift(old, new) == 1
 
     def test_no_overlap(self, sessions_dir):
-        from src.tty import TTYManager
-
         # Completely different content (e.g. massive output burst)
         old = ["A", "B", "C"]
         new = ["X", "Y", "Z"]
         assert TTYManager._detect_buffer_shift(old, new) == 3
 
     def test_empty_old(self, sessions_dir):
-        from src.tty import TTYManager
-
         assert TTYManager._detect_buffer_shift([], ["A", "B"]) == 2
 
     def test_hwm_adjusts_on_slide(self, sessions_dir):
-        from src.tty import TTY, TTYManager
-
         mgr = TTYManager(sessions_dir=sessions_dir)
         tty = TTY(0, sessions_dir)
         tty.tty_dir.mkdir(parents=True)
@@ -547,8 +466,6 @@ class TestBufferShift:
         assert tty.get_new_lines() == ["F", "G"]
 
     def test_hwm_partially_caught_up(self, sessions_dir):
-        from src.tty import TTY, TTYManager
-
         tty = TTY(0, sessions_dir)
         # Agent has seen A, B, C (HWM=3), buffer has [A, B, C, D, E]
         tty.previous_lines = ["A", "B", "C", "D", "E"]
@@ -569,8 +486,6 @@ class TestTTYTmuxIntegration:
 
     @pytest.fixture
     async def tmux_tty_manager(self, tmp_path, test_container):
-        from src.tty import TTYManager
-
         sessions_dir = tmp_path / "sessions"
         sessions_dir.mkdir()
         archive_dir = tmp_path / "archive"
@@ -587,8 +502,6 @@ class TestTTYTmuxIntegration:
 
     async def test_send_keys_and_capture(self, tmux_tty_manager):
         """Sending keys and capturing output works."""
-        import asyncio
-
         tty = await tmux_tty_manager.get_or_create_tty(0)
         await tmux_tty_manager.send_keys(0, "echo hello-from-tty")
         await tmux_tty_manager.send_keys(0, "Enter")
@@ -598,8 +511,6 @@ class TestTTYTmuxIntegration:
 
     async def test_session_files_written(self, tmux_tty_manager):
         """Session files are written on capture."""
-        import asyncio
-
         tty = await tmux_tty_manager.get_or_create_tty(0)
         await tmux_tty_manager.send_keys(0, "echo file-test")
         await tmux_tty_manager.send_keys(0, "Enter")
@@ -634,8 +545,6 @@ class TestTTYTmuxIntegration:
 
     async def test_diff_tracking(self, tmux_tty_manager):
         """Diff tracking shows new output correctly."""
-        import asyncio
-
         tty = await tmux_tty_manager.get_or_create_tty(0)
 
         # Initial capture was done by get_or_create_tty and marked as seen
@@ -659,8 +568,6 @@ class TestTTYTmuxIntegration:
 
     async def test_current_command_detected(self, tmux_tty_manager):
         """_check_tty_status detects the foreground process, not just bash."""
-        import asyncio
-
         tty = await tmux_tty_manager.get_or_create_tty(0)
 
         # Bash idle — should report bash
@@ -686,8 +593,6 @@ class TestTTYTmuxIntegration:
         Uses an inline script since the test container doesn't have
         the full CLI suite.
         """
-        import asyncio
-
         tty = await tmux_tty_manager.get_or_create_tty(0)
 
         # Create a simple script that stays running (simulates a CLI)

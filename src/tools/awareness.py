@@ -15,8 +15,8 @@ from typing import Any
 from claude_agent_sdk import tool
 
 from ..config import data_dir
-
 from ..logging_config import get_logger
+from ..tty import get_tty_manager
 
 logger = get_logger(__name__)
 
@@ -48,8 +48,6 @@ def check_tick_end_conditions() -> list[str]:
     Returns a list of blocking issues. Empty list = kernel checks pass.
     Always checks: login called, TTYs closed.
     """
-    from ..tty import get_tty_manager
-
     issues = []
 
     if not _tick.logged_in:
@@ -181,8 +179,6 @@ async def _launch_startup_ttys(tty_mgr) -> list[str]:
 )
 async def login(args: dict[str, Any]) -> dict[str, Any]:
     """Login: report lost TTYs, launch startup TTYs, return output."""
-    from ..tty import get_tty_manager
-
     _tick.logged_in = True
 
     sections = []

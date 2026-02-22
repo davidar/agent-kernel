@@ -65,10 +65,11 @@ line-length = 120
 
 [tool.ruff.lint]
 select = [
-    "E",   # pycodestyle errors
-    "F",   # pyflakes (undefined names, unused imports, etc.)
-    "B",   # flake8-bugbear
-    "UP",  # pyupgrade
+    "E",      # pycodestyle errors
+    "F",      # pyflakes (undefined names, unused imports, etc.)
+    "B",      # flake8-bugbear
+    "UP",     # pyupgrade
+    "PLC0415", # import-outside-toplevel
 ]
 ignore = [
     "E501",  # line too long (handled by formatter)

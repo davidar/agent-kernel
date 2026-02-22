@@ -18,7 +18,7 @@ from claude_agent_sdk import (
     ResultMessage,
     HookMatcher,
 )
-from claude_agent_sdk.types import HookJSONOutput
+from claude_agent_sdk.types import HookJSONOutput, SystemMessage
 
 from .config import data_dir, ensure_dirs, get_state, save_state, get_agent_config
 from .tools import (
@@ -51,8 +51,6 @@ def _patched_parse(data):
         return _original_parse(data)
     except Exception as e:
         if "Unknown message type" in str(e):
-            from claude_agent_sdk.types import SystemMessage
-
             logging.getLogger(__name__).debug(f"Ignoring unknown message type: {data.get('type', '?')}")
             return SystemMessage(subtype="unknown", data=data)
         raise

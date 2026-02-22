@@ -13,6 +13,8 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
+from watchfiles import awatch, Change
+
 from .config import data_dir
 from .logging_config import get_logger
 
@@ -89,8 +91,6 @@ class TickWatcher:
 
         # Try inotify first
         try:
-            from watchfiles import awatch, Change
-
             inotify_task = asyncio.create_task(self._inotify_notifications(awatch, Change))
             poll_task = asyncio.create_task(self._poll_notifications())
             # Run both — inotify catches fast, polling catches stragglers

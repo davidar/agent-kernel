@@ -6,6 +6,7 @@ import stat
 import pytest
 
 import src.config as config
+import src.hooks as hooks_mod
 from src.hooks import run_hooks
 
 
@@ -82,8 +83,6 @@ class TestRunHooks:
         asyncio.run(run_hooks("test-hook", {}))
 
     def test_timeout(self, hook_env):
-        import src.hooks as hooks_mod
-
         old_timeout = hooks_mod.HOOK_TIMEOUT
         hooks_mod.HOOK_TIMEOUT = 1  # 1 second timeout
         try:

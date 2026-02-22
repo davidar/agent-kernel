@@ -28,8 +28,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from . import container as ctr
 from .config import data_dir
-from .container import _has_podman
+from .container import _has_podman, derive_instance_id, get_container_name
 from .logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -173,8 +174,6 @@ class TTYManager:
         if archive_dir is None:
             archive_dir = data_dir() / "system" / "logs" / "sessions"
         if container_name is None:
-            from .container import derive_instance_id, get_container_name
-
             container_name = get_container_name(derive_instance_id(data_dir()))
         self.sessions_dir = sessions_dir
         self.archive_dir = archive_dir
@@ -652,8 +651,6 @@ class TTYManager:
 
     async def _ensure_container(self) -> None:
         """Ensure the container is running with working networking."""
-        from . import container as ctr
-
         # Check if image needs rebuilding (content-addressed)
         try:
             await ctr.check_rebuild(data_dir(), self.container_name)

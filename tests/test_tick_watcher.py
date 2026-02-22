@@ -4,12 +4,13 @@ import asyncio
 
 import pytest
 
+import src.config
+from src.tick_watcher import TickWatcher
+
 
 @pytest.fixture
 def watcher_env(data_dir):
     """Set up environment for tick watcher tests."""
-    import src.config
-
     src.config.init(data_dir)
     return data_dir
 
@@ -22,7 +23,6 @@ def _write_notification(notifications_dir, filename, content="[New message from 
 class TestTickWatcherDispatchLoop:
     async def test_queued_message_delivered(self, watcher_env):
         """Messages on the queue are delivered via callback."""
-        from src.tick_watcher import TickWatcher
 
         delivered = []
 
@@ -42,7 +42,6 @@ class TestTickWatcherDispatchLoop:
 
     async def test_multiple_messages_delivered_in_order(self, watcher_env):
         """Multiple queued messages are delivered in order."""
-        from src.tick_watcher import TickWatcher
 
         delivered = []
 
@@ -65,7 +64,6 @@ class TestTickWatcherDispatchLoop:
 class TestTickWatcherNotificationFiles:
     async def test_poll_detects_new_notification(self, watcher_env):
         """Polling detects new notification files."""
-        from src.tick_watcher import TickWatcher
 
         delivered = []
 
@@ -93,7 +91,6 @@ class TestTickWatcherNotificationFiles:
 
     async def test_preexisting_notifications_consumed(self, watcher_env):
         """Notification files present at startup are consumed and delivered."""
-        from src.tick_watcher import TickWatcher
 
         delivered = []
 
@@ -121,7 +118,6 @@ class TestTickWatcherNotificationFiles:
 
     async def test_notification_file_consumed(self, watcher_env):
         """Notification files are deleted after being consumed."""
-        from src.tick_watcher import TickWatcher
 
         async def noop(msg):
             pass
@@ -148,7 +144,6 @@ class TestTickWatcherNotificationFiles:
 class TestTickWatcherLifecycle:
     async def test_start_stop(self, watcher_env):
         """Watcher starts and stops cleanly."""
-        from src.tick_watcher import TickWatcher
 
         async def noop(msg):
             pass
@@ -164,7 +159,6 @@ class TestTickWatcherLifecycle:
 
     async def test_stop_is_idempotent(self, watcher_env):
         """Calling stop() twice doesn't error."""
-        from src.tick_watcher import TickWatcher
 
         async def noop(msg):
             pass
@@ -176,7 +170,6 @@ class TestTickWatcherLifecycle:
 
     async def test_callback_error_doesnt_crash_dispatch(self, watcher_env):
         """If callback raises, dispatch loop continues."""
-        from src.tick_watcher import TickWatcher
 
         call_count = 0
 

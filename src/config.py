@@ -4,6 +4,7 @@ Call init(data_dir) once at startup before accessing any paths.
 """
 
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -35,8 +36,6 @@ def ensure_dirs() -> None:
     (dd / "sandbox").mkdir(parents=True, exist_ok=True)
 
     # Wipe and recreate tmp/ — catches stale state from crashed ticks
-    import shutil
-
     tmp_dir = dd / "tmp"
     if tmp_dir.exists():
         shutil.rmtree(tmp_dir, ignore_errors=True)

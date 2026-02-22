@@ -6,12 +6,14 @@ wakes, runs ticks, and manages crash notifications.
 
 import hashlib
 import json
+import shutil
 import signal
 import sys
 import time
 import traceback
 from datetime import datetime
 
+from .agent import main as run_agent
 from .config import data_dir, ensure_dirs, get_state
 from .logging_config import setup_process_logging, get_logger
 from .tools.schedule import get_pending_wakes, mark_wake_fulfilled, cleanup_old_wakes
@@ -59,7 +61,6 @@ def run_watcher(poll_interval: float = 2.0) -> None:
     """Main watcher loop — poll for triggers, run ticks."""
     setup_process_logging("watcher")
     ensure_dirs()
-    from .agent import main as run_agent
 
     trigger_file = data_dir() / "system" / "tick_trigger"
 
@@ -86,8 +87,6 @@ def run_watcher(poll_interval: float = 2.0) -> None:
     # Clean up stale tmp/ from a previous crashed tick
     tmp_dir = data_dir() / "tmp"
     if tmp_dir.exists():
-        import shutil
-
         logger.info("Cleaning up stale tmp/")
         shutil.rmtree(tmp_dir, ignore_errors=True)
 

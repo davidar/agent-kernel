@@ -4,11 +4,18 @@ Entry point: agent-kernel <subcommand> [--data PATH] [args...]
 """
 
 import argparse
+import asyncio
 import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+from . import config
+from .agent import main as run_agent
+from .container import setup as container_setup
+from .registry import DATA_BASE_DIR, get_instance_info, list_instances, register, resolve, unregister
+from .watcher import run_watcher
 
 
 def _resolve_data_arg(data_arg: str) -> Path:
@@ -17,8 +24,6 @@ def _resolve_data_arg(data_arg: str) -> Path:
     Checks the instance registry first (for short names like 'my-agent'),
     then treats as a filesystem path.
     """
-    from .registry import resolve
-
     resolved = resolve(data_arg)
     if resolved is not None:
         return resolved
@@ -32,25 +37,16 @@ def _resolve_data_arg(data_arg: str) -> Path:
 
 def cmd_tick(args):
     """Run a single agent tick."""
-    from .agent import main as run_agent
-
     run_agent()
 
 
 def cmd_watch(args):
     """Watch for triggers and auto-tick."""
-    from .watcher import run_watcher
-
     run_watcher(poll_interval=args.interval)
 
 
 def cmd_init(args):
     """Initialize a new agent instance — clone a repo or register an existing path."""
-    import asyncio
-
-    from . import config
-    from .registry import DATA_BASE_DIR, register
-
     url = args.url
     name = args.name
     branch = args.branch
@@ -93,8 +89,6 @@ def cmd_init(args):
             sys.exit(1)
 
     # Check registry for name collision
-    from .registry import get_instance_info
-
     if get_instance_info(name):
         print(f"Error: Instance '{name}' is already registered.")
         print("Use a different --name.")
@@ -104,10 +98,8 @@ def cmd_init(args):
     config.init(dest)
 
     # Build container
-    from .container import setup
-
     try:
-        asyncio.run(setup(dest))
+        asyncio.run(container_setup(dest))
     except FileNotFoundError as e:
         print(f"Warning: {e}")
         print("Container setup skipped. You can add a Containerfile later.")
@@ -124,8 +116,6 @@ def cmd_init(args):
 
 def cmd_install(args):
     """Install systemd user services for an instance."""
-    from .registry import get_instance_info, resolve
-
     name = args.name
     info = get_instance_info(name)
 
@@ -194,8 +184,6 @@ def cmd_uninstall(args):
 
 def cmd_remove(args):
     """Remove a registered instance."""
-    from .registry import get_instance_info, unregister
-
     name = args.name
     info = get_instance_info(name)
     if not info:
@@ -228,8 +216,6 @@ def cmd_remove(args):
 
 def cmd_list(args):
     """List registered agent instances."""
-    from .registry import list_instances
-
     instances = list_instances()
     if not instances:
         print("No registered instances.")
@@ -254,8 +240,6 @@ def cmd_list(args):
 
 
 def main():
-    from . import config
-
     parser = argparse.ArgumentParser(
         prog="agent-kernel",
         description="Portable agent kernel — install, point, run",

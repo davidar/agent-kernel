@@ -3,9 +3,13 @@
 Integration tests require podman + agent-test image with tmux installed.
 """
 
+import asyncio
 from unittest.mock import AsyncMock, patch
 
 import pytest
+
+from src.tools.terminal import type_tool
+from src.tty import TTY, TTYManager
 
 
 class TestPointAndCall:
@@ -14,8 +18,6 @@ class TestPointAndCall:
     @pytest.fixture
     def mock_manager(self, tmp_path):
         """Create a TTYManager with fake TTYs (no podman)."""
-        from src.tty import TTY, TTYManager
-
         sessions_dir = tmp_path / "sessions"
         sessions_dir.mkdir()
         mgr = TTYManager(sessions_dir=sessions_dir)
@@ -40,8 +42,6 @@ class TestPointAndCall:
 
     async def test_expect_matches_allows_send(self, mock_manager):
         """type() succeeds when expect matches the running command."""
-        from src.tools.terminal import type_tool
-
         with (
             patch("src.tools.terminal.is_logged_in", return_value=True),
             patch("src.tools.terminal.get_tty_manager", return_value=mock_manager),
@@ -53,8 +53,6 @@ class TestPointAndCall:
 
     async def test_expect_mismatch_blocks_send(self, mock_manager):
         """type() fails when expect doesn't match the running command."""
-        from src.tools.terminal import type_tool
-
         with (
             patch("src.tools.terminal.is_logged_in", return_value=True),
             patch("src.tools.terminal.get_tty_manager", return_value=mock_manager),
@@ -69,8 +67,6 @@ class TestPointAndCall:
 
     async def test_expect_case_insensitive(self, mock_manager):
         """Expect matching is case-insensitive."""
-        from src.tools.terminal import type_tool
-
         with (
             patch("src.tools.terminal.is_logged_in", return_value=True),
             patch("src.tools.terminal.get_tty_manager", return_value=mock_manager),
@@ -81,8 +77,6 @@ class TestPointAndCall:
 
     async def test_expect_required(self, mock_manager):
         """type() fails when expect is not provided."""
-        from src.tools.terminal import type_tool
-
         with (
             patch("src.tools.terminal.is_logged_in", return_value=True),
             patch("src.tools.terminal.get_tty_manager", return_value=mock_manager),
@@ -93,8 +87,6 @@ class TestPointAndCall:
 
     async def test_expect_empty_string_rejected(self, mock_manager):
         """type() fails when expect is an empty string."""
-        from src.tools.terminal import type_tool
-
         with (
             patch("src.tools.terminal.is_logged_in", return_value=True),
             patch("src.tools.terminal.get_tty_manager", return_value=mock_manager),
@@ -105,8 +97,6 @@ class TestPointAndCall:
 
     async def test_new_tty_skips_check(self, mock_manager):
         """For a TTY that doesn't exist yet, expect check is skipped (TTY will be auto-created)."""
-        from src.tools.terminal import type_tool
-
         with (
             patch("src.tools.terminal.is_logged_in", return_value=True),
             patch("src.tools.terminal.get_tty_manager", return_value=mock_manager),
@@ -118,9 +108,6 @@ class TestPointAndCall:
 
     async def test_expect_uses_current_command_over_command(self, tmp_path):
         """Expect checks against current_command, not the original creation command."""
-        from src.tty import TTY, TTYManager
-        from src.tools.terminal import type_tool
-
         sessions_dir = tmp_path / "sessions"
         sessions_dir.mkdir()
         mgr = TTYManager(sessions_dir=sessions_dir)
@@ -147,9 +134,6 @@ class TestPointAndCall:
 
     async def test_expect_falls_back_to_command_when_no_current(self, tmp_path):
         """When current_command is empty, expect checks against command."""
-        from src.tty import TTY, TTYManager
-        from src.tools.terminal import type_tool
-
         sessions_dir = tmp_path / "sessions"
         sessions_dir.mkdir()
         mgr = TTYManager(sessions_dir=sessions_dir)
@@ -174,8 +158,6 @@ class TestTerminalToolLogic:
 
     @pytest.fixture
     async def tty_manager(self, tmp_path, test_container):
-        from src.tty import TTYManager
-
         sessions_dir = tmp_path / "sessions"
         sessions_dir.mkdir()
         mgr = TTYManager(sessions_dir=sessions_dir, container_name=test_container)
@@ -190,8 +172,6 @@ class TestTerminalToolLogic:
 
     async def test_send_keys_literal(self, tty_manager):
         """Literal text is sent via send-keys -l."""
-        import asyncio
-
         await tty_manager.get_or_create_tty(0)
         await tty_manager.send_keys(0, "echo keytest")
         await tty_manager.send_keys(0, "Enter")
@@ -209,8 +189,6 @@ class TestTerminalToolLogic:
 
     async def test_has_unseen_changes(self, tty_manager):
         """has_unseen_changes detects new TTY output."""
-        import asyncio
-
         tty = await tty_manager.get_or_create_tty(0)
         # After creation, everything is marked as seen
         assert tty_manager.has_unseen_changes() is False
@@ -243,8 +221,6 @@ class TestTerminalToolLogic:
 
     async def test_tty_session_files_created(self, tty_manager):
         """Session files are created for each TTY."""
-        import asyncio
-
         tty = await tty_manager.get_or_create_tty(0)
         await tty_manager.send_keys(0, "echo logfile-test")
         await tty_manager.send_keys(0, "Enter")
