@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - run: uv run ruff check src/ tests/
+      - run: uv run ruff format --check src/ tests/
+      - run: uv run pyright src/
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+
+      - name: Build test container
+        run: podman build -t localhost/agent-test -f tests/Containerfile.test tests/
+
+      - name: Run tests (no skips allowed)
+        run: uv run pytest tests/ -p no:cacheprovider -x -v --strict-markers

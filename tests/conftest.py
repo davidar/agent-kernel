@@ -88,7 +88,7 @@ async def test_container():
     All tests in a class share the same container (they use separate tmux sessions).
     """
     if not _has_podman():
-        pytest.skip("podman not available")
+        pytest.fail("podman is required for integration tests but not found in PATH")
 
     await _ensure_test_image()
 
