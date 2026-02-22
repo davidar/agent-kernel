@@ -106,19 +106,16 @@ def cmd_init(args):
     # Build container
     from .container import setup
 
-    instance_id = name  # Use registry name as instance_id
     try:
-        container_name = asyncio.run(setup(dest, instance_id=instance_id))
+        asyncio.run(setup(dest))
     except FileNotFoundError as e:
         print(f"Warning: {e}")
         print("Container setup skipped. You can add a Containerfile later.")
-        container_name = f"agent-kernel-{instance_id}"
     except Exception as e:
         print(f"Container setup failed: {e}")
-        container_name = f"agent-kernel-{instance_id}"
 
     # Register
-    register(name, dest, remote=remote, container_name=container_name)
+    register(name, dest, remote=remote)
 
     print("\nReady.")
     print(f"  agent-kernel watch --data {name}")
@@ -242,7 +239,6 @@ def cmd_list(args):
     print("=== Registered Instances ===")
     for name, info in instances.items():
         path = info.get("path", "?")
-        container = info.get("container", "?")
         remote = info.get("remote", "")
         created = info.get("created", "")[:10]
 
@@ -251,7 +247,6 @@ def cmd_list(args):
 
         print(f"\n  {name}")
         print(f"    Path:      {path} [{status}]")
-        print(f"    Container: {container}")
         if remote:
             print(f"    Remote:    {remote}")
         if created:

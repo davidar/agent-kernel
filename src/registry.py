@@ -36,14 +36,12 @@ def register(
     name: str,
     path: Path,
     remote: str | None = None,
-    container_name: str | None = None,
 ) -> None:
     """Register an instance in the registry."""
     registry = load_registry()
     registry[name] = {
         "path": str(path.resolve()),
         "remote": remote,
-        "container": container_name or f"agent-kernel-{name}",
         "created": datetime.now().isoformat(),
     }
     save_registry(registry)

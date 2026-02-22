@@ -35,26 +35,8 @@ from .logging_config import get_logger
 logger = get_logger(__name__)
 
 
-def _get_default_container_name() -> str:
-    """Get the container name from registry, or derive from data_dir."""
-    # Check if data_dir is a registered instance — use that container name
-    from .registry import load_registry
-
-    registry = load_registry()
-    data_dir_str = str(data_dir().resolve())
-    for info in registry.values():
-        if info.get("path") == data_dir_str and info.get("container"):
-            return info["container"]
-
-    from .container import derive_instance_id, get_container_name
-
-    return get_container_name(derive_instance_id(data_dir()))
-
-
-async def _podman_exec(*cmd: str, container: str | None = None) -> str:
+async def _podman_exec(*cmd: str, container: str) -> str:
     """Run a command in the container, return stdout."""
-    if container is None:
-        container = _get_default_container_name()
     proc = await asyncio.create_subprocess_exec(
         "podman",
         "exec",
@@ -191,7 +173,9 @@ class TTYManager:
         if archive_dir is None:
             archive_dir = data_dir() / "system" / "logs" / "sessions"
         if container_name is None:
-            container_name = _get_default_container_name()
+            from .container import derive_instance_id, get_container_name
+
+            container_name = get_container_name(derive_instance_id(data_dir()))
         self.sessions_dir = sessions_dir
         self.archive_dir = archive_dir
         self.tick_number = tick_number
@@ -908,8 +892,7 @@ async def init_tty_manager(tick_number: int = 0) -> TTYManager:
     global _tty_manager
     if _tty_manager is not None:
         _tty_manager._running = False
-    container_name = _get_default_container_name()
-    _tty_manager = TTYManager(tick_number=tick_number, container_name=container_name)
+    _tty_manager = TTYManager(tick_number=tick_number)
     await _tty_manager.start()
     return _tty_manager
 
