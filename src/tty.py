@@ -28,9 +28,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from . import container as ctr
 from .config import data_dir
-from .container import _has_podman, derive_instance_id, get_container_name
+from .container import derive_instance_id, get_container_name
 from .logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -188,15 +187,16 @@ class TTYManager:
         self.build_error: str | None = None
 
     async def start(self) -> None:
-        """Start the background capture loop."""
+        """Start the background capture loop.
+
+        Caller must ensure the container is running before calling start()
+        (e.g. via container.ensure_ready()). start() only detects stale TTYs.
+        """
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
         self._running = True
         self._capture_task = asyncio.create_task(self._capture_loop())
 
-        # Ensure container is running
-        if _has_podman():
-            await self._ensure_container()
-            await self._detect_stale_ttys()
+        await self._detect_stale_ttys()
 
     async def stop(self) -> None:
         """Stop the capture loop."""
@@ -227,7 +227,7 @@ class TTYManager:
         tty.tty_dir.mkdir(parents=True, exist_ok=True)
 
         # Check for surviving tmux session (hot-reload recovery)
-        if _has_podman() and await self._tmux_session_exists(tty.tmux_name):
+        if await self._tmux_session_exists(tty.tmux_name):
             logger.info(f"TTY {tty_id}: reconnecting to surviving tmux session")
             await self._setup_pipe(tty)
         else:
@@ -481,15 +481,15 @@ class TTYManager:
             # Write scrollback file (full tmux buffer dump — tmux handles the size limit)
             try:
                 tty.scrollback_file.write_text("\n".join(lines) + "\n" if lines else "")
-            except OSError:
-                pass
+            except OSError as e:
+                logger.debug("TTY %d: write scrollback failed: %s", tty.id, e)
 
             # 2. Write screen file (visible portion — last DEFAULT_ROWS lines)
             visible_lines = lines[-DEFAULT_ROWS:] if len(lines) > DEFAULT_ROWS else lines
             try:
                 tty.screen_file.write_text("\n".join(visible_lines) + "\n" if visible_lines else "")
-            except OSError:
-                pass
+            except OSError as e:
+                logger.debug("TTY %d: write screen failed: %s", tty.id, e)
 
             # 3. Capture screen with ANSI colors
             try:
@@ -505,8 +505,8 @@ class TTYManager:
                 while ansi_lines and not ansi_lines[-1].strip():
                     ansi_lines.pop()
                 tty.screen_ansi_file.write_text("\n".join(ansi_lines) + "\n" if ansi_lines else "")
-            except Exception:
-                pass  # Non-critical for agent operation
+            except Exception as e:
+                logger.debug("TTY %d: ANSI capture failed: %s", tty.id, e)
 
             # 4. Write status and rotate raw if needed
             self._write_status(tty)
@@ -551,8 +551,8 @@ class TTYManager:
         except RuntimeError:
             # Session doesn't exist = process is dead
             tty.process_dead = True
-        except Exception:
-            pass  # Non-critical check
+        except Exception as e:
+            logger.debug("TTY %d: status check failed: %s", tty.id, e)
 
     _INTERPRETERS = frozenset({"python3", "python", "node", "ruby", "perl", "bash", "sh"})
 
@@ -577,8 +577,8 @@ class TTYManager:
             argv = cmdline.split("\x00")
             if len(argv) >= 2 and "/" in argv[1]:
                 return argv[1].rsplit("/", 1)[-1]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("TTY: resolve command name failed for pid %s: %s", pane_pid, e)
         return cmd
 
     @staticmethod
@@ -614,8 +614,8 @@ class TTYManager:
             status = "idle"
         try:
             tty.status_file.write_text(status + "\n")
-        except OSError:
-            pass
+        except OSError as e:
+            logger.debug("TTY %d: write status failed: %s", tty.id, e)
 
     def _rotate_raw_if_needed(self, tty: TTY) -> None:
         """Truncate raw file if it exceeds size limit."""
@@ -624,8 +624,8 @@ class TTYManager:
                 size = tty.raw_file.stat().st_size
                 if size > RAW_MAX_BYTES:
                     tty.raw_file.write_text("")
-        except OSError:
-            pass
+        except OSError as e:
+            logger.debug("TTY %d: raw rotation failed: %s", tty.id, e)
 
     # --- Pipe-pane (raw ANSI output capture) ---
 
@@ -646,29 +646,6 @@ class TTYManager:
         )
         # Touch raw file on host side
         tty.raw_file.touch()
-
-    # --- Container management (delegates to src/container.py) ---
-
-    async def _ensure_container(self) -> None:
-        """Ensure the container is running with working networking."""
-        # Check if image needs rebuilding (content-addressed)
-        try:
-            await ctr.check_rebuild(data_dir(), self.container_name)
-        except Exception as e:
-            self.build_error = str(e)
-            logger.error(f"Container rebuild check failed: {e}")
-
-        await ctr.ensure_running(self.container_name)
-
-        # Verify DNS works — rootless podman network namespaces break after
-        # reboots or when slirp4netns dies, leaving routes intact but DNS dead.
-        dns_ok = await ctr.dns_works(self.container_name)
-        if not dns_ok:
-            logger.warning("Container DNS is broken, recreating container...")
-            await ctr.destroy(self.container_name)
-            await ctr.setup(data_dir())
-            await ctr.prune_stale(keep_container=self.container_name)
-            logger.info("Container recreated with fresh networking")
 
     async def _tmux_session_exists(self, name: str) -> bool:
         """Check if a tmux session exists in the container."""
@@ -720,8 +697,8 @@ class TTYManager:
                 "history-limit",
                 str(SCROLLBACK_LINES),
             )
-        except Exception:
-            pass  # Non-critical
+        except Exception as e:
+            logger.debug("TTY %d: set history-limit failed: %s", tty.id, e)
 
     # --- TTY lifecycle ---
 
@@ -731,11 +708,10 @@ class TTYManager:
         if not tty:
             return False
 
-        if _has_podman():
-            try:
-                await self._exec("tmux", "kill-session", "-t", tty.tmux_name)
-            except RuntimeError:
-                pass
+        try:
+            await self._exec("tmux", "kill-session", "-t", tty.tmux_name)
+        except RuntimeError as e:
+            logger.debug("TTY %d: kill-session failed (already dead?): %s", tty_id, e)
 
         # Archive the TTY directory (scrollback is valuable for reference)
         self._archive_dir(tty.tty_dir)
@@ -803,8 +779,8 @@ class TTYManager:
         if registry_file.exists():
             try:
                 return json.loads(registry_file.read_text())
-            except (json.JSONDecodeError, OSError):
-                pass
+            except (json.JSONDecodeError, OSError) as e:
+                logger.debug("Failed to load TTY registry: %s", e)
         return {}
 
     # --- Stale TTY detection ---
@@ -821,9 +797,7 @@ class TTYManager:
         self._stale_ttys = []
 
         for name, meta in registry.items():
-            alive = False
-            if _has_podman():
-                alive = await self._tmux_session_exists(name)
+            alive = await self._tmux_session_exists(name)
 
             if alive:
                 logger.info(f"TTY '{name}' survived (tmux still alive)")
@@ -838,8 +812,8 @@ class TTYManager:
                 if has_scrollback:
                     try:
                         scrollback.rename(tty_dir / "scrollback.prev")
-                    except OSError:
-                        pass
+                    except OSError as e:
+                        logger.debug("Failed to rename scrollback for %s: %s", name, e)
 
                 self._stale_ttys.append(
                     {
@@ -859,7 +833,7 @@ class TTYManager:
                 if not entry.is_dir() or not entry.name.startswith("tty_") or entry.name in registry_names:
                     continue
                 # Check if there's a live tmux session for this orphan
-                if _has_podman() and await self._tmux_session_exists(entry.name):
+                if await self._tmux_session_exists(entry.name):
                     continue
                 logger.info(f"Archiving orphan TTY directory '{entry.name}'")
                 self._archive_dir(entry)
@@ -869,8 +843,8 @@ class TTYManager:
             try:
                 registry_file = self.sessions_dir / "registry.json"
                 registry_file.unlink(missing_ok=True)
-            except OSError:
-                pass
+            except OSError as e:
+                logger.debug("Failed to clear stale registry: %s", e)
 
 
 # Module-level reference to the current tick's TTYManager.
@@ -879,17 +853,23 @@ class TTYManager:
 _tty_manager: TTYManager | None = None
 
 
-async def init_tty_manager(tick_number: int = 0) -> TTYManager:
+async def init_tty_manager(tick_number: int = 0, build_error: str | None = None) -> TTYManager:
     """Create and start a new TTYManager for this tick.
 
     Each tick runs in a new asyncio.run() event loop, so the manager
     (with its asyncio.Event and capture Task) must be recreated per tick.
     Called from run_tick() at the start of each tick.
+
+    Caller must ensure the container is running before calling this
+    (e.g. via container.ensure_ready()). build_error is passed through
+    for reporting via login().
     """
     global _tty_manager
     if _tty_manager is not None:
         _tty_manager._running = False
     _tty_manager = TTYManager(tick_number=tick_number)
+    if build_error:
+        _tty_manager.build_error = build_error
     await _tty_manager.start()
     return _tty_manager
 

@@ -17,17 +17,11 @@ Container naming: agent-kernel-{instance_id}
 import asyncio
 import hashlib
 import re
-import shutil
 from pathlib import Path
 
 from .logging_config import get_logger
 
 logger = get_logger(__name__)
-
-
-def _has_podman() -> bool:
-    """Check if podman is available on the host."""
-    return shutil.which("podman") is not None
 
 
 def derive_instance_id(data_dir: Path) -> str:
@@ -338,6 +332,26 @@ async def prune_stale(keep_container: str | None = None) -> None:
             await _run("podman", "rmi", img)
 
 
+async def ensure_ready(data_dir: Path, container_name: str) -> str | None:
+    """Ensure container is running with working networking. Returns build error or None."""
+    build_error = None
+    try:
+        await check_rebuild(data_dir, container_name)
+    except Exception as e:
+        build_error = str(e)
+        logger.error("Container rebuild check failed: %s", e)
+
+    await ensure_running(container_name)
+
+    if not await dns_works(container_name):
+        logger.warning("Container DNS is broken, recreating...")
+        await destroy(container_name)
+        await setup(data_dir)
+        await prune_stale(keep_container=container_name)
+
+    return build_error
+
+
 async def check_rebuild(data_dir: Path, container_name: str) -> None:
     """Rebuild the container image if the Containerfile has changed.
 
@@ -391,9 +405,6 @@ async def setup(
 
     Returns the container name.
     """
-    if not _has_podman():
-        raise RuntimeError("podman is not installed")
-
     if instance_id is None:
         instance_id = derive_instance_id(data_dir)
 

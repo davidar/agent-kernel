@@ -20,6 +20,7 @@ from claude_agent_sdk import (
 from claude_agent_sdk.types import HookJSONOutput, SystemMessage
 
 from .config import data_dir, ensure_dirs, get_state, save_state, get_agent_config
+from .container import ensure_ready, derive_instance_id, get_container_name
 from .tools import (
     agent_server,
     AGENT_TOOLS,
@@ -205,9 +206,14 @@ async def run_tick():
 
     reset_tick_state()
 
+    # Start container before hooks so they run inside it
+    container_name = get_container_name(derive_instance_id(data_dir()))
+    build_error = await ensure_ready(data_dir(), container_name)
+
     await run_hooks(
         "pre-tick",
         {f"{hook_env_prefix}_TICK": str(tick_number)},
+        container=container_name,
     )
 
     agents = _load_agents(agent_config)
@@ -267,7 +273,7 @@ async def run_tick():
 
     try:
         async with ClaudeSDKClient(options=options) as client:
-            tty_mgr = await init_tty_manager(tick_number=tick_number)
+            tty_mgr = await init_tty_manager(tick_number=tick_number, build_error=build_error)
 
             async def _notify_and_interrupt(msg: str) -> object:
                 tty_mgr.interrupt()
@@ -382,7 +388,9 @@ async def run_tick():
                             f"{hook_env_prefix}_LAST_MESSAGE": (last_assistant_text or "")[:2000],
                             f"{hook_env_prefix}_SESSION_ID": tick_session_id,
                         }
-                        script_issues = await run_hooks_collect("pre-stop", script_env, timeout=30)
+                        script_issues = await run_hooks_collect(
+                            "pre-stop", script_env, container=container_name, timeout=30
+                        )
                         issues.extend(script_issues)
 
                     if not last_assistant_text.strip():
@@ -435,7 +443,26 @@ async def run_tick():
                 f"{hook_env_prefix}_SESSION_ID": tick_session_id,
                 f"{hook_env_prefix}_TICK_STATUS": tick_status,
             },
+            container=container_name,
         )
+
+        # Push data repo (best-effort, runs on host for SSH key access)
+        if (data_dir() / ".git").is_dir():
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "git",
+                    "-C",
+                    str(data_dir()),
+                    "push",
+                    "--quiet",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                _, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+                if proc.returncode != 0:
+                    logger.warning("git push failed: %s", stderr.decode().strip())
+            except Exception:
+                logger.warning("git push failed", exc_info=True)
 
     except KeyboardInterrupt:
         duration = (datetime.now() - tick_start).total_seconds()

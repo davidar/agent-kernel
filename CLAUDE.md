@@ -45,11 +45,13 @@ Executable scripts in `system/hooks/` run at tick boundaries. This lets post-tic
 - `system/hooks/post-tick/` — run after transcript copied, before function returns
 
 **Execution model:**
-- Executable scripts run in sorted order on the **host** (not in container)
+- Executable scripts run in sorted order **inside the container** via `podman exec`
+- The container is started before pre-tick hooks, so all hooks use the container's toolchain
 - Each script gets: `DATA_DIR`, `{PREFIX}_TICK` (always), plus `{PREFIX}_TICK_DURATION`, `{PREFIX}_TICK_LOG`, `{PREFIX}_LAST_MESSAGE`, `{PREFIX}_SESSION_ID`, `{PREFIX}_TICK_STATUS` (post-tick only)
 - `{PREFIX}_TICK_STATUS` is `"normal"` (agent ended cleanly) or `"abnormal"` (interrupted/compacted)
 - `{PREFIX}` is `hook_env_prefix` from config (default: `"AGENT"`)
 - 60s timeout (pre-tick/post-tick), 30s timeout (pre-stop). Failures logged, never fatal. Dotfiles and `~` backup files ignored.
+- After post-tick hooks, the kernel runs `git push` on the **host** (best-effort, needs host SSH keys)
 
 ### Logging (`src/logging_config.py`)
 

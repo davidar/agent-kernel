@@ -91,12 +91,14 @@ Each tick is a **stateless Claude SDK session**. No conversation history persist
 
 1. Watcher detects a trigger file (`system/tick_trigger`) or a due entry in `system/schedule.json`
 2. Tick count incremented in `system/state.json`
-3. Pre-tick hooks run on the host (`system/hooks/pre-tick/`)
-4. Fresh SDK session starts; agent receives `initial_query`, calls `login()`
-5. Agent works through TTYs — typing commands, reading output, interacting with programs
-6. When the model produces a text response (no tool calls), tick-end conditions are checked: was `login()` called? Are all TTYs closed? Do the pre-stop hooks pass (`system/hooks/pre-stop/`)? If not, the agent is told what's blocking and continues.
-7. Post-tick hooks run (`system/hooks/post-tick/`) with `{PREFIX}_TICK_STATUS` set to `"normal"` or `"abnormal"`
-8. Transcript copied to `system/logs/tick-NNN.jsonl`, `tmp/` wiped
+3. Container started (image rebuilt if Containerfile changed)
+4. Pre-tick hooks run inside the container (`system/hooks/pre-tick/`)
+5. Fresh SDK session starts; agent receives `initial_query`, calls `login()`
+6. Agent works through TTYs — typing commands, reading output, interacting with programs
+7. When the model produces a text response (no tool calls), tick-end conditions are checked: was `login()` called? Are all TTYs closed? Do the pre-stop hooks pass (`system/hooks/pre-stop/`)? If not, the agent is told what's blocking and continues.
+8. Post-tick hooks run inside the container (`system/hooks/post-tick/`) with `{PREFIX}_TICK_STATUS` set to `"normal"` or `"abnormal"`
+9. Kernel runs `git push` on the host (best-effort, needs SSH keys)
+10. Transcript copied to `system/logs/tick-NNN.jsonl`, `tmp/` wiped
 
 Throughout the tick, a background TickWatcher delivers notification files (`system/notifications/*.txt`) into the conversation via `client.query()` — this is how external events (new messages, etc.) reach the agent mid-tick. At ~70% context usage (140K tokens), the agent is warned to wrap up. If context is about to overflow entirely, a PreCompact hook ends the tick immediately rather than letting the SDK compact away mid-tick context.
 
@@ -150,7 +152,7 @@ The data repo is the agent's identity. The kernel reads config from it, writes s
 | `system/tick_trigger` | → Watcher | Presence triggers a tick; content is the reason; file consumed |
 | `system/notifications/*.txt` | → Agent | Delivered mid-tick, then deleted |
 
-Hooks receive `DATA_DIR` and `{PREFIX}_TICK` env vars. Post-tick hooks additionally get `{PREFIX}_TICK_DURATION`, `{PREFIX}_TICK_LOG`, `{PREFIX}_LAST_MESSAGE`, `{PREFIX}_SESSION_ID`, and `{PREFIX}_TICK_STATUS` (`"normal"` or `"abnormal"`). Pre-stop hooks also get `{PREFIX}_LAST_MESSAGE` and `{PREFIX}_SESSION_ID`. The prefix defaults to `AGENT`, configurable via `hook_env_prefix` in `agent_config.json`. Pre-tick and post-tick hooks have a 60-second timeout; pre-stop hooks have a 30-second timeout. Hooks run in sorted filename order. Failures are logged, never fatal.
+Hooks run **inside the container** via `podman exec`, using the container's toolchain (git, python, CLIs). They receive `DATA_DIR` and `{PREFIX}_TICK` env vars. Post-tick hooks additionally get `{PREFIX}_TICK_DURATION`, `{PREFIX}_TICK_LOG`, `{PREFIX}_LAST_MESSAGE`, `{PREFIX}_SESSION_ID`, and `{PREFIX}_TICK_STATUS` (`"normal"` or `"abnormal"`). Pre-stop hooks also get `{PREFIX}_LAST_MESSAGE` and `{PREFIX}_SESSION_ID`. The prefix defaults to `AGENT`, configurable via `hook_env_prefix` in `agent_config.json`. Pre-tick and post-tick hooks have a 60-second timeout; pre-stop hooks have a 30-second timeout. Hooks run in sorted filename order. Failures are logged, never fatal. After post-tick hooks, the kernel runs `git push` on the host (best-effort — needs host SSH keys, which aren't available in the container).
 
 ## CLI
 
