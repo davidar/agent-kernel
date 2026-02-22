@@ -9,15 +9,65 @@ from pathlib import Path
 
 import pytest
 
-# Initialize config before any src imports
+import src.registry as registry
 from src.config import init as _config_init
 
-_config_init(Path(tempfile.mkdtemp(prefix="agent-test-data-")))
+
+def _use_tmp_registry(tmp_path: Path) -> None:
+    """Point the registry at a temp dir so tests don't touch the real one."""
+    registry.REGISTRY_DIR = tmp_path / "config"
+    registry.REGISTRY_FILE = registry.REGISTRY_DIR / "instances.json"
+    registry.DATA_BASE_DIR = tmp_path / "data"
+
+
+# Snapshot the real registry file so we can detect accidental writes.
+_REAL_REGISTRY_FILE = Path("~/.config/agent-kernel/instances.json").expanduser()
+_REAL_REGISTRY_SNAPSHOT: bytes | None = _REAL_REGISTRY_FILE.read_bytes() if _REAL_REGISTRY_FILE.exists() else None
+_REAL_REGISTRY_EXISTED = _REAL_REGISTRY_FILE.exists()
+
+
+@pytest.fixture(autouse=True)
+def _guard_real_registry():
+    """Fail the test if it accidentally wrote to the real registry."""
+    yield
+    now_exists = _REAL_REGISTRY_FILE.exists()
+    if not _REAL_REGISTRY_EXISTED and now_exists:
+        pytest.fail(f"Test created the real registry file: {_REAL_REGISTRY_FILE}")
+    if _REAL_REGISTRY_EXISTED and now_exists:
+        current = _REAL_REGISTRY_FILE.read_bytes()
+        if current != _REAL_REGISTRY_SNAPSHOT:
+            pytest.fail(f"Test modified the real registry file: {_REAL_REGISTRY_FILE}")
+
+
+# Module-level setup: register a dummy "test" instance so config.init works
+# at import time for modules that need it.
+_tmp = Path(tempfile.mkdtemp(prefix="agent-test-"))
+_use_tmp_registry(_tmp)
+_data = _tmp / "data" / "test"
+_data.mkdir(parents=True)
+registry.register("test", _data)
+_config_init("test")
 
 
 @pytest.fixture
-def data_dir(tmp_path):
-    """Create a temporary data directory with standard structure."""
+def tmp_registry(tmp_path):
+    """Redirect the registry to a temp dir for the duration of a test.
+
+    Saves/restores the real registry globals so tests are isolated.
+    """
+    orig_dir = registry.REGISTRY_DIR
+    orig_file = registry.REGISTRY_FILE
+    orig_data = registry.DATA_BASE_DIR
+    _use_tmp_registry(tmp_path)
+    yield tmp_path
+    registry.REGISTRY_DIR = orig_dir
+    registry.REGISTRY_FILE = orig_file
+    registry.DATA_BASE_DIR = orig_data
+
+
+@pytest.fixture
+def data_dir(tmp_path, tmp_registry):
+    """Create a temporary data directory registered as "test" and init config."""
     d = tmp_path / "data"
     (d / "system").mkdir(parents=True)
     (d / "system" / "notifications").mkdir(parents=True)
@@ -36,6 +86,10 @@ def data_dir(tmp_path):
 
     # Write a default schedule.json
     (d / "system" / "schedule.json").write_text(json.dumps({"wakes": []}, indent=2))
+
+    # Register and init config
+    registry.register("test", d)
+    _config_init("test")
 
     return d
 

@@ -11,7 +11,7 @@ The agent interacts with the world through **numbered terminal TTYs** in a conta
 **Key components:**
 - **4 custom tools** (`login`, `type`, `wait`, `close`) + SDK built-ins (Read, Write, Edit, Glob, Grep, NotebookEdit, WebSearch, WebFetch, TodoWrite, Task, Skill)
 - **TTY manager** (`src/tty.py`): tmux-backed TTYs in the container. Output captured via capture-pane, input via send-keys. Continuous capture loop writes per-TTY files. Diff tracking via high-water marks — observe-before-act pattern.
-- **Container** (`agent-kernel-{instance}`): Persistent podman container. Name derived from instance ID. Managed by `src/container.py`.
+- **Container** (`agent-kernel-{name}`): Persistent podman container. Named after the registered instance. Managed by `src/container.py`.
 - **Shared filesystem**: Data repo mounted into container
 
 **How it works:**
@@ -65,8 +65,8 @@ Executable scripts in `system/hooks/` run at tick boundaries. This lets post-tic
 ```
 src/
 ├── agent.py           # Tick loop, SDK client, error handling, transcript copy
-├── cli.py             # Host CLI (agent-kernel tick/watch/init/list/remove/install/uninstall)
-├── config.py          # init()/data_dir() accessor, state helpers, agent_config
+├── cli.py             # Host CLI (agent-kernel <cmd> <name>)
+├── config.py          # init()/data_dir()/instance_name() accessor, state helpers, agent_config
 ├── container.py       # Container management (build, start, exec)
 ├── errors.py          # Error detection and classification
 ├── hooks.py           # Hook runner (pre-tick, pre-stop, post-tick)

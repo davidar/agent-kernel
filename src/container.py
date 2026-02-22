@@ -8,45 +8,21 @@ Image naming: agent-kernel-img-{sha256(build_dir_contents)[:12]}
   - When Containerfile changes, a new image is built. Old images are
     pruned if no container references them.
 
-Container naming: agent-kernel-{instance_id}
-  - One container per instance (data repo path).
-  - Registered instances use their registry name as instance_id.
-  - Ad-hoc paths use {slug}-{sha256(abspath)[:8]}.
+Container naming: agent-kernel-{name}
+  - One container per registered instance.
+  - Name comes from the instance registry.
 """
 
 import asyncio
 import hashlib
-import re
-from pathlib import Path
 
+from .config import data_dir, get_container_name
 from .logging_config import get_logger
 
 logger = get_logger(__name__)
 
 
-def derive_instance_id(data_dir: Path) -> str:
-    """Derive a stable, unique instance ID from a data directory path.
-
-    Returns {slug}-{hash[:8]} where slug is a sanitized version of the
-    directory basename and hash is derived from the absolute path.
-    For registered instances, use the registry name instead.
-    """
-    name = data_dir.name
-    slug = re.sub(r"[^a-z0-9]", "-", name.lower()).strip("-")
-    if not slug:
-        slug = "data"
-    # Collapse multiple hyphens
-    slug = re.sub(r"-+", "-", slug)
-    path_hash = hashlib.sha256(str(data_dir.resolve()).encode()).hexdigest()[:8]
-    return f"{slug}-{path_hash}"
-
-
-def get_container_name(instance_id: str) -> str:
-    """Get the podman container name for an instance."""
-    return f"agent-kernel-{instance_id}"
-
-
-def compute_image_name(data_dir: Path) -> str:
+def compute_image_name() -> str:
     """Compute a content-addressed image name from the build directory.
 
     Hashes all files in $DATA_DIR/system/container/ (sorted by name for
@@ -55,9 +31,10 @@ def compute_image_name(data_dir: Path) -> str:
     If no build directory exists, returns a fallback name based on
     the data dir path.
     """
-    build_dir = data_dir / "system" / "container"
+    dd = data_dir()
+    build_dir = dd / "system" / "container"
     if not build_dir.is_dir():
-        path_hash = hashlib.sha256(str(data_dir.resolve()).encode()).hexdigest()[:12]
+        path_hash = hashlib.sha256(str(dd.resolve()).encode()).hexdigest()[:12]
         return f"agent-kernel-img-{path_hash}"
 
     h = hashlib.sha256()
@@ -134,7 +111,7 @@ async def container_running(container_name: str) -> bool:
     return rc == 0 and stdout.strip() == "true"
 
 
-async def build_image(data_dir: Path, force: bool = False) -> str:
+async def build_image(force: bool = False) -> str:
     """Build the container image if it doesn't already exist.
 
     Uses content-addressed naming: the image name is derived from the
@@ -143,9 +120,10 @@ async def build_image(data_dir: Path, force: bool = False) -> str:
 
     Returns the image name.
     """
-    image_name = compute_image_name(data_dir)
-    containerfile = data_dir / "system" / "container" / "Containerfile"
-    build_context = data_dir / "system" / "container"
+    dd = data_dir()
+    image_name = compute_image_name()
+    containerfile = dd / "system" / "container" / "Containerfile"
+    build_context = dd / "system" / "container"
 
     if not containerfile.exists():
         raise FileNotFoundError(
@@ -178,7 +156,6 @@ async def build_image(data_dir: Path, force: bool = False) -> str:
 
 
 async def create_container(
-    data_dir: Path,
     container_name: str,
     image_name: str,
 ) -> None:
@@ -187,12 +164,13 @@ async def create_container(
     Mounts data_dir at the same path inside the container so host and
     container paths match (SDK tools and terminal tools see the same paths).
     """
+    dd = data_dir()
     # Ensure data directories exist
-    (data_dir / "sandbox").mkdir(parents=True, exist_ok=True)
-    (data_dir / "system").mkdir(parents=True, exist_ok=True)
-    (data_dir / "system" / "notifications").mkdir(parents=True, exist_ok=True)
+    (dd / "sandbox").mkdir(parents=True, exist_ok=True)
+    (dd / "system").mkdir(parents=True, exist_ok=True)
+    (dd / "system" / "notifications").mkdir(parents=True, exist_ok=True)
 
-    resolved = str(data_dir.resolve())
+    resolved = str(dd.resolve())
     volumes = [
         "--volume",
         f"{resolved}:{resolved}:Z,rw",
@@ -332,11 +310,12 @@ async def prune_stale(keep_container: str | None = None) -> None:
             await _run("podman", "rmi", img)
 
 
-async def ensure_ready(data_dir: Path, container_name: str) -> str | None:
+async def ensure_ready() -> str | None:
     """Ensure container is running with working networking. Returns build error or None."""
+    container_name = get_container_name()
     build_error = None
     try:
-        await check_rebuild(data_dir, container_name)
+        await check_rebuild()
     except Exception as e:
         build_error = str(e)
         logger.error("Container rebuild check failed: %s", e)
@@ -346,25 +325,27 @@ async def ensure_ready(data_dir: Path, container_name: str) -> str | None:
     if not await dns_works(container_name):
         logger.warning("Container DNS is broken, recreating...")
         await destroy(container_name)
-        await setup(data_dir)
+        await setup()
         await prune_stale(keep_container=container_name)
 
     return build_error
 
 
-async def check_rebuild(data_dir: Path, container_name: str) -> None:
+async def check_rebuild() -> None:
     """Rebuild the container image if the Containerfile has changed.
 
     Compares the current content-addressed image name with the image
     the container was built from. If they differ, rebuilds and recreates
     the container, then prunes stale containers and unused images.
     """
-    build_dir = data_dir / "system" / "container"
+    dd = data_dir()
+    container_name = get_container_name()
+    build_dir = dd / "system" / "container"
     if not build_dir.is_dir():
         return
 
     # Compute what the image name should be now
-    current_image = compute_image_name(data_dir)
+    current_image = compute_image_name()
 
     # Check if the running container already uses this image
     if await container_exists(container_name):
@@ -380,13 +361,13 @@ async def check_rebuild(data_dir: Path, container_name: str) -> None:
         logger.info("Containerfile changed, rebuilding image...")
 
     try:
-        new_image = await build_image(data_dir, force=not image_ready)
+        new_image = await build_image(force=not image_ready)
 
         # Recreate container with new image
         if await container_exists(container_name):
             await destroy(container_name)
 
-        await create_container(data_dir, container_name, new_image)
+        await create_container(container_name, new_image)
         await ensure_running(container_name)
         logger.info("Container recreated with new image")
 
@@ -396,20 +377,13 @@ async def check_rebuild(data_dir: Path, container_name: str) -> None:
         logger.error(f"Image rebuild failed: {e}")
 
 
-async def setup(
-    data_dir: Path,
-    instance_id: str | None = None,
-    rebuild: bool = False,
-) -> str:
+async def setup(rebuild: bool = False) -> str:
     """Full container setup: build image, create container, start it.
 
     Returns the container name.
     """
-    if instance_id is None:
-        instance_id = derive_instance_id(data_dir)
-
-    container_name = get_container_name(instance_id)
-    image_name = await build_image(data_dir, force=rebuild)
+    container_name = get_container_name()
+    image_name = await build_image(force=rebuild)
 
     # If container exists with a different image, recreate
     if await container_exists(container_name):
@@ -420,7 +394,7 @@ async def setup(
             await ensure_running(container_name)
             return container_name
 
-    await create_container(data_dir, container_name, image_name)
+    await create_container(container_name, image_name)
     await ensure_running(container_name)
 
     # Verify container is working

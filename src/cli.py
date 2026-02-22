@@ -1,11 +1,9 @@
 """CLI interface for the agent kernel.
 
-Entry point: agent-kernel <subcommand> [--data PATH] [args...]
+Entry point: agent-kernel <subcommand> <name> [args...]
 """
 
 import argparse
-import asyncio
-import os
 import shutil
 import subprocess
 import sys
@@ -13,23 +11,8 @@ from pathlib import Path
 
 from . import config
 from .agent import main as run_agent
-from .container import setup as container_setup
-from .registry import DATA_BASE_DIR, get_instance_info, list_instances, register, resolve, unregister
+from .registry import DATA_BASE_DIR, get_instance_info, list_instances, register, unregister
 from .watcher import run_watcher
-
-
-def _resolve_data_arg(data_arg: str) -> Path:
-    """Resolve a --data argument to an absolute path.
-
-    Checks the instance registry first (for short names like 'my-agent'),
-    then treats as a filesystem path.
-    """
-    resolved = resolve(data_arg)
-    if resolved is not None:
-        return resolved
-
-    # Treat as a path even if it doesn't exist yet (init might create it)
-    return Path(data_arg).expanduser().resolve()
 
 
 # --- Subcommands ---
@@ -37,11 +20,13 @@ def _resolve_data_arg(data_arg: str) -> Path:
 
 def cmd_tick(args):
     """Run a single agent tick."""
+    config.init(args.name)
     run_agent()
 
 
 def cmd_watch(args):
     """Watch for triggers and auto-tick."""
+    config.init(args.name)
     run_watcher(poll_interval=args.interval)
 
 
@@ -94,23 +79,11 @@ def cmd_init(args):
         print("Use a different --name.")
         sys.exit(1)
 
-    # Set config for container modules
-    config.init(dest)
-
-    # Build container
-    try:
-        asyncio.run(container_setup(dest))
-    except FileNotFoundError as e:
-        print(f"Warning: {e}")
-        print("Container setup skipped. You can add a Containerfile later.")
-    except Exception as e:
-        print(f"Container setup failed: {e}")
-
-    # Register
     register(name, dest, remote=remote)
 
     print("\nReady.")
-    print(f"  agent-kernel watch --data {name}")
+    print(f"  agent-kernel tick {name}")
+    print(f"  agent-kernel watch {name}")
     print(f"  agent-kernel install {name}")
 
 
@@ -119,25 +92,29 @@ def cmd_install(args):
     name = args.name
     info = get_instance_info(name)
 
-    if info:
-        data_dir = info["path"]
-    else:
-        resolved = resolve(name)
-        if resolved is None:
-            print(f"Error: Instance '{name}' not found in registry and not a valid path.")
-            sys.exit(1)
-        data_dir = str(resolved)
+    if not info:
+        print(f"Error: Instance '{name}' not found in registry.")
+        sys.exit(1)
+
+    service_dir = Path.home() / ".config" / "systemd" / "user"
+    service_dir.mkdir(parents=True, exist_ok=True)
+
+    service_name = f"agent-kernel-{name}"
+    service_file = service_dir / f"{service_name}.service"
+    container_name = f"agent-kernel-{name}"
+
+    # Uninstall existing service if present
+    if service_file.exists():
+        print("Existing service found, reinstalling...")
+        subprocess.run(["systemctl", "--user", "stop", f"{service_name}.service"], capture_output=True)
+        subprocess.run(["systemctl", "--user", "disable", f"{service_name}.service"], capture_output=True)
+        service_file.unlink()
 
     # Find the kernel binary
     kernel_bin = shutil.which("agent-kernel")
     if not kernel_bin:
         # Fallback: use current Python with module
         kernel_bin = f"{sys.executable} -m src.cli"
-
-    service_dir = Path.home() / ".config" / "systemd" / "user"
-    service_dir.mkdir(parents=True, exist_ok=True)
-
-    service_name = f"agent-kernel-{name}"
 
     # Watcher service
     watcher_service = f"""[Unit]
@@ -146,14 +123,15 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart={kernel_bin} watch --data {data_dir}
+ExecStart={kernel_bin} watch {name}
+ExecStopPost=podman stop --time 5 {container_name}
 Restart=always
 RestartSec=10
+KillMode=process
 
 [Install]
 WantedBy=default.target
 """
-    service_file = service_dir / f"{service_name}.service"
     service_file.write_text(watcher_service)
     print(f"Wrote {service_file}")
 
@@ -245,17 +223,16 @@ def main():
         description="Portable agent kernel — install, point, run",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--data", "-d", help="Data directory path or registered instance name")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # --- Core subcommands ---
 
     tick_parser = subparsers.add_parser("tick", help="Run a single agent tick")
-    tick_parser.add_argument("--data", "-d", help=argparse.SUPPRESS)
+    tick_parser.add_argument("name", help="Instance name")
     tick_parser.set_defaults(func=cmd_tick)
 
     watch_parser = subparsers.add_parser("watch", help="Watch for triggers and auto-tick")
-    watch_parser.add_argument("--data", "-d", help=argparse.SUPPRESS)
+    watch_parser.add_argument("name", help="Instance name")
     watch_parser.add_argument("--interval", "-i", type=float, default=2.0, help="Poll interval in seconds")
     watch_parser.set_defaults(func=cmd_watch)
 
@@ -284,15 +261,6 @@ def main():
     list_parser.set_defaults(func=cmd_list)
 
     args = parser.parse_args()
-
-    # Commands that need a data directory
-    needs_data = args.command in ("tick", "watch", "init")
-    if needs_data and args.command != "init":
-        data_arg = args.data or os.environ.get("DATA_DIR")
-        if not data_arg:
-            parser.error("--data is required (or set DATA_DIR env var)")
-        config.init(_resolve_data_arg(data_arg))
-
     args.func(args)
 
 

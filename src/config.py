@@ -1,6 +1,6 @@
 """Configuration and state helpers — safe to import from anywhere.
 
-Call init(data_dir) once at startup before accessing any paths.
+Call init(name) once at startup before accessing any paths.
 """
 
 import json
@@ -8,16 +8,22 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from .registry import resolve
 from .types import State
 
 
 _data_dir: Path | None = None
+_instance_name: str | None = None
 
 
-def init(data_dir: Path) -> None:
-    """Set the data directory. Must be called before any other config access."""
-    global _data_dir
-    _data_dir = data_dir
+def init(name: str) -> None:
+    """Initialize config from a registered instance name."""
+    global _data_dir, _instance_name
+    path = resolve(name)
+    if path is None:
+        raise ValueError(f"Instance '{name}' not found in registry")
+    _data_dir = path
+    _instance_name = name
 
 
 def data_dir() -> Path:
@@ -25,6 +31,18 @@ def data_dir() -> Path:
     if _data_dir is None:
         raise RuntimeError("config.init() not called")
     return _data_dir
+
+
+def instance_name() -> str:
+    """Get the instance name. Raises if init() hasn't been called."""
+    if _instance_name is None:
+        raise RuntimeError("config.init() not called")
+    return _instance_name
+
+
+def get_container_name() -> str:
+    """Get the podman container name for this instance."""
+    return f"agent-kernel-{instance_name()}"
 
 
 def ensure_dirs() -> None:

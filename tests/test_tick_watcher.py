@@ -4,14 +4,12 @@ import asyncio
 
 import pytest
 
-import src.config
 from src.tick_watcher import TickWatcher
 
 
 @pytest.fixture
 def watcher_env(data_dir):
     """Set up environment for tick watcher tests."""
-    src.config.init(data_dir)
     return data_dir
 
 

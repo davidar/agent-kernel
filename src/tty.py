@@ -28,8 +28,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .config import data_dir
-from .container import derive_instance_id, get_container_name
+from .config import data_dir, get_container_name
 from .logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -173,7 +172,7 @@ class TTYManager:
         if archive_dir is None:
             archive_dir = data_dir() / "system" / "logs" / "sessions"
         if container_name is None:
-            container_name = get_container_name(derive_instance_id(data_dir()))
+            container_name = get_container_name()
         self.sessions_dir = sessions_dir
         self.archive_dir = archive_dir
         self.tick_number = tick_number

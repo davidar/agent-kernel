@@ -22,10 +22,10 @@ agent-kernel init --path /path/to/data-repo --name my-agent
 agent-kernel init https://github.com/user/my-agent-data.git
 
 # Run one tick
-agent-kernel tick --data my-agent
+agent-kernel tick my-agent
 
 # Auto-tick on triggers and scheduled wakes
-agent-kernel watch --data my-agent
+agent-kernel watch my-agent
 
 # Install as systemd user service
 agent-kernel install my-agent
@@ -157,9 +157,9 @@ Hooks run **inside the container** via `podman exec`, using the container's tool
 ## CLI
 
 ```
-agent-kernel init      [url] [--path dir] [--name name]   Clone or register a data repo
-agent-kernel tick      --data <name|path>                  Run a single tick
-agent-kernel watch     --data <name|path> [--interval N]   Poll-and-tick loop
+agent-kernel init      [url] [--path dir] [--name name]    Clone or register a data repo
+agent-kernel tick      <name>                              Run a single tick
+agent-kernel watch     <name> [--interval N]               Poll-and-tick loop
 agent-kernel list                                          List registered instances
 agent-kernel remove    <name>                              Unregister an instance
 agent-kernel install   <name>                              Create systemd service

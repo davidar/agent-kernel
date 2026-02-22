@@ -8,6 +8,7 @@ import uuid
 import pytest
 
 import src.config as config
+import src.registry as registry
 from src.hooks import run_hooks, run_hooks_collect
 from tests.conftest import _TEST_IMAGE, _ensure_test_image
 
@@ -88,13 +89,14 @@ async def _rm_container(name: str):
 
 
 @pytest.fixture
-def hook_env(hook_container):
+def hook_env(hook_container, tmp_registry):
     """Set up a data dir with hook directories inside the mounted volume."""
     name, tmp = hook_container
     # Create a unique subdir per test to avoid collisions
     data = tmp / f"data-{uuid.uuid4().hex[:8]}"
     data.mkdir()
-    config.init(data)
+    registry.register("test", data)
+    config.init("test")
     hook_dir = data / "system" / "hooks" / "test-hook"
     hook_dir.mkdir(parents=True, exist_ok=True)
     return hook_dir, name
@@ -105,11 +107,12 @@ class TestRunHooks:
         hook_dir, container = hook_env
         asyncio.run(run_hooks("test-hook", {}, container=container))
 
-    def test_no_dir(self, hook_container):
+    def test_no_dir(self, hook_container, tmp_registry):
         name, tmp = hook_container
         data = tmp / f"data-{uuid.uuid4().hex[:8]}"
         data.mkdir()
-        config.init(data)
+        registry.register("test", data)
+        config.init("test")
         asyncio.run(run_hooks("nonexistent-hook", {}, container=name))
 
     def test_runs_script(self, hook_env):
@@ -227,11 +230,12 @@ class TestRunHooksCollect:
         lines = asyncio.run(run_hooks_collect("test-hook", {}, container=container))
         assert lines == []
 
-    def test_no_dir(self, hook_container):
+    def test_no_dir(self, hook_container, tmp_registry):
         name, tmp = hook_container
         data = tmp / f"data-{uuid.uuid4().hex[:8]}"
         data.mkdir()
-        config.init(data)
+        registry.register("test", data)
+        config.init("test")
         lines = asyncio.run(run_hooks_collect("nonexistent-hook", {}, container=name))
         assert lines == []
 

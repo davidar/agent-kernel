@@ -54,22 +54,14 @@ def unregister(name: str) -> None:
     save_registry(registry)
 
 
-def resolve(name_or_path: str) -> Path | None:
-    """Resolve an instance name or path to a data directory.
+def resolve(name: str) -> Path | None:
+    """Resolve a registered instance name to a data directory.
 
-    Checks the registry first, then treats as a filesystem path.
-    Returns None if neither matches.
+    Returns None if the name is not in the registry.
     """
-    # Check registry
     registry = load_registry()
-    if name_or_path in registry:
-        return Path(registry[name_or_path]["path"])
-
-    # Treat as filesystem path
-    p = Path(name_or_path).expanduser().resolve()
-    if p.is_dir():
-        return p
-
+    if name in registry:
+        return Path(registry[name]["path"])
     return None
 
 

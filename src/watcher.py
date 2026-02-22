@@ -4,6 +4,7 @@ This is the system's heartbeat: watches for trigger files and schedule
 wakes, runs ticks, and manages crash notifications.
 """
 
+import asyncio
 import hashlib
 import json
 import shutil
@@ -14,7 +15,8 @@ import traceback
 from datetime import datetime
 
 from .agent import main as run_agent
-from .config import data_dir, ensure_dirs, get_state
+from .config import data_dir, ensure_dirs, get_container_name, get_state
+from .container import ensure_ready
 from .logging_config import setup_process_logging, get_logger
 from .tools.schedule import get_pending_wakes, mark_wake_fulfilled, cleanup_old_wakes
 
@@ -61,6 +63,13 @@ def run_watcher(poll_interval: float = 2.0) -> None:
     """Main watcher loop — poll for triggers, run ticks."""
     setup_process_logging("watcher")
     ensure_dirs()
+
+    # Start container immediately so daemons can run before first tick
+    try:
+        asyncio.run(ensure_ready())
+        logger.info(f"Container {get_container_name()} ready")
+    except Exception as e:
+        logger.error(f"Container startup failed: {e}")
 
     trigger_file = data_dir() / "system" / "tick_trigger"
 

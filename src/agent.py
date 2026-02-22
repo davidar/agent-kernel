@@ -19,8 +19,8 @@ from claude_agent_sdk import (
 )
 from claude_agent_sdk.types import HookJSONOutput, SystemMessage
 
-from .config import data_dir, ensure_dirs, get_state, save_state, get_agent_config
-from .container import ensure_ready, derive_instance_id, get_container_name
+from .config import data_dir, ensure_dirs, get_container_name, get_state, save_state, get_agent_config
+from .container import ensure_ready
 from .tools import (
     agent_server,
     AGENT_TOOLS,
@@ -207,8 +207,8 @@ async def run_tick():
     reset_tick_state()
 
     # Start container before hooks so they run inside it
-    container_name = get_container_name(derive_instance_id(data_dir()))
-    build_error = await ensure_ready(data_dir(), container_name)
+    container_name = get_container_name()
+    build_error = await ensure_ready()
 
     await run_hooks(
         "pre-tick",
