@@ -13,46 +13,87 @@ logger = get_logger(__name__)
 HOOK_TIMEOUT = 60  # seconds per script
 
 
-async def run_hooks(hook_type: str, env: dict[str, str]) -> None:
-    """Run executable scripts from data_dir/system/hooks/{hook_type}/ in sorted order."""
+def _discover_scripts(hook_type: str) -> list[Path]:
+    """Find executable scripts in system/hooks/{hook_type}/, sorted by name."""
     hook_dir = data_dir() / "system" / "hooks" / hook_type
     if not hook_dir.is_dir():
-        return
-
-    # Discover executable scripts (skip dotfiles, backups, non-executable)
-    scripts: list[Path] = sorted(
+        return []
+    return sorted(
         p
         for p in hook_dir.iterdir()
         if p.is_file() and not p.name.startswith(".") and not p.name.endswith("~") and os.access(p, os.X_OK)
     )
 
+
+def _build_env(env: dict[str, str]) -> dict[str, str]:
+    """Merge caller env with os.environ + DATA_DIR."""
+    return {**os.environ, "DATA_DIR": str(data_dir()), **env}
+
+
+def _run_script(
+    hook_type: str,
+    script: Path,
+    env: dict[str, str],
+    timeout: int,
+) -> subprocess.CompletedProcess[str] | None:
+    """Run one hook script. Returns CompletedProcess on success, None on error/timeout."""
+    try:
+        result = subprocess.run(
+            [str(script)],
+            env=env,
+            capture_output=True,
+            timeout=timeout,
+            text=True,
+        )
+        if result.returncode != 0:
+            logger.warning(
+                "Hook %s/%s failed (exit %d): %s",
+                hook_type,
+                script.name,
+                result.returncode,
+                result.stderr.strip()[:500],
+            )
+            return None
+        logger.debug("Hook %s/%s ok", hook_type, script.name)
+        return result
+    except subprocess.TimeoutExpired:
+        logger.warning("Hook %s/%s timed out after %ds", hook_type, script.name, timeout)
+        return None
+    except Exception:
+        logger.exception("Hook %s/%s error", hook_type, script.name)
+        return None
+
+
+async def run_hooks(hook_type: str, env: dict[str, str], *, timeout: int = HOOK_TIMEOUT) -> None:
+    """Run executable scripts from data_dir/system/hooks/{hook_type}/ in sorted order."""
+    scripts = _discover_scripts(hook_type)
     if not scripts:
         return
 
-    # Merge caller env with os.environ (caller env wins)
-    full_env = {**os.environ, "DATA_DIR": str(data_dir()), **env}
+    full_env = _build_env(env)
 
     for script in scripts:
-        try:
-            result = await asyncio.to_thread(
-                subprocess.run,
-                [str(script)],
-                env=full_env,
-                capture_output=True,
-                timeout=HOOK_TIMEOUT,
-                text=True,
-            )
-            if result.returncode != 0:
-                logger.warning(
-                    "Hook %s/%s failed (exit %d): %s",
-                    hook_type,
-                    script.name,
-                    result.returncode,
-                    result.stderr.strip()[:500],
-                )
-            else:
-                logger.debug("Hook %s/%s ok", hook_type, script.name)
-        except subprocess.TimeoutExpired:
-            logger.warning("Hook %s/%s timed out after %ds", hook_type, script.name, HOOK_TIMEOUT)
-        except Exception:
-            logger.exception("Hook %s/%s error", hook_type, script.name)
+        await asyncio.to_thread(_run_script, hook_type, script, full_env, timeout)
+
+
+async def run_hooks_collect(hook_type: str, env: dict[str, str], *, timeout: int = HOOK_TIMEOUT) -> list[str]:
+    """Run hook scripts and collect stdout lines from successful (exit 0) scripts.
+
+    Failed or timed-out scripts return no lines (fail-open).
+    """
+    scripts = _discover_scripts(hook_type)
+    if not scripts:
+        return []
+
+    full_env = _build_env(env)
+    lines: list[str] = []
+
+    for script in scripts:
+        result = await asyncio.to_thread(_run_script, hook_type, script, full_env, timeout)
+        if result is not None:
+            for line in result.stdout.splitlines():
+                stripped = line.strip()
+                if stripped:
+                    lines.append(stripped)
+
+    return lines

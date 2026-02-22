@@ -3,7 +3,6 @@
 import asyncio
 import json
 import logging
-import os
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -26,11 +25,10 @@ from .tools import (
     AGENT_TOOLS,
     reset_tick_state,
     check_tick_end_conditions,
-    run_tick_end_script,
     is_logged_in,
 )
 from .logging_config import setup_process_logging, get_logger
-from .hooks import run_hooks
+from .hooks import run_hooks, run_hooks_collect
 from .tick_watcher import TickWatcher
 from .tty import init_tty_manager, shutdown_tty_manager
 from .errors import ErrorDetector
@@ -384,7 +382,7 @@ async def run_tick():
                             f"{hook_env_prefix}_LAST_MESSAGE": (last_assistant_text or "")[:2000],
                             f"{hook_env_prefix}_SESSION_ID": tick_session_id,
                         }
-                        script_issues = await run_tick_end_script(script_env)
+                        script_issues = await run_hooks_collect("pre-stop", script_env, timeout=30)
                         issues.extend(script_issues)
 
                     if not last_assistant_text.strip():
@@ -397,27 +395,6 @@ async def run_tick():
 
                     tick_active = False
                     break
-
-            # Abnormal termination: run data repo's abnormal-exit script
-            if tick_active:
-                script_path = data_dir() / "system" / "abnormal-exit"
-                if script_path.exists() and os.access(script_path, os.X_OK):
-                    try:
-                        proc = await asyncio.create_subprocess_exec(
-                            str(script_path),
-                            env={
-                                **os.environ,
-                                "DATA_DIR": str(data_dir()),
-                                f"{hook_env_prefix}_TICK": str(tick_number),
-                            },
-                            stdout=asyncio.subprocess.PIPE,
-                            stderr=asyncio.subprocess.PIPE,
-                        )
-                        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
-                        if stdout.strip():
-                            logger.info(stdout.decode().strip())
-                    except Exception:
-                        logger.exception("abnormal-exit script failed")
 
             if watcher:
                 await watcher.stop()
@@ -446,6 +423,8 @@ async def run_tick():
         logger.info("TICK %d COMPLETE (%.1fs)%s", tick_number, duration, usage_info)
         logger.info("=" * 60)
 
+        tick_status = "abnormal" if tick_active else "normal"
+
         await run_hooks(
             "post-tick",
             {
@@ -454,6 +433,7 @@ async def run_tick():
                 f"{hook_env_prefix}_TICK_LOG": str(transcript_path or ""),
                 f"{hook_env_prefix}_LAST_MESSAGE": (last_assistant_text or "")[:2000],
                 f"{hook_env_prefix}_SESSION_ID": tick_session_id,
+                f"{hook_env_prefix}_TICK_STATUS": tick_status,
             },
         )
 

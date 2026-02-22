@@ -41,13 +41,15 @@ Executable scripts in `system/hooks/` run at tick boundaries. This lets post-tic
 
 **Directories:**
 - `system/hooks/pre-tick/` — run after state update, before agent starts
+- `system/hooks/pre-stop/` — mid-tick validation when agent wants to stop. Stdout lines become blocking issues (fail-open: failures/timeouts produce no issues). 30s timeout.
 - `system/hooks/post-tick/` — run after transcript copied, before function returns
 
 **Execution model:**
 - Executable scripts run in sorted order on the **host** (not in container)
-- Each script gets: `DATA_DIR`, `{PREFIX}_TICK` (always), plus `{PREFIX}_TICK_DURATION`, `{PREFIX}_TICK_LOG`, `{PREFIX}_LAST_MESSAGE`, `{PREFIX}_SESSION_ID` (post-tick only)
+- Each script gets: `DATA_DIR`, `{PREFIX}_TICK` (always), plus `{PREFIX}_TICK_DURATION`, `{PREFIX}_TICK_LOG`, `{PREFIX}_LAST_MESSAGE`, `{PREFIX}_SESSION_ID`, `{PREFIX}_TICK_STATUS` (post-tick only)
+- `{PREFIX}_TICK_STATUS` is `"normal"` (agent ended cleanly) or `"abnormal"` (interrupted/compacted)
 - `{PREFIX}` is `hook_env_prefix` from config (default: `"AGENT"`)
-- 60s timeout. Failures logged, never fatal. Dotfiles and `~` backup files ignored.
+- 60s timeout (pre-tick/post-tick), 30s timeout (pre-stop). Failures logged, never fatal. Dotfiles and `~` backup files ignored.
 
 ### Logging (`src/logging_config.py`)
 
@@ -65,7 +67,7 @@ src/
 ├── config.py          # init()/data_dir() accessor, state helpers, agent_config
 ├── container.py       # Container management (build, start, exec)
 ├── errors.py          # Error detection and classification
-├── hooks.py           # Pre-tick / post-tick hook runner
+├── hooks.py           # Hook runner (pre-tick, pre-stop, post-tick)
 ├── logging_config.py  # Rotating log files, journalctl output
 ├── registry.py        # Instance registry (name → path mapping)
 ├── tick_watcher.py    # Mid-tick notification delivery (inotify + polling)

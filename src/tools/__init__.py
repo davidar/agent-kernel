@@ -16,7 +16,6 @@ from .awareness import (
     is_logged_in,
     login,
     reset_tick_state,
-    run_tick_end_script,
 )
 
 # === Terminal multiplexer tools ===
@@ -51,7 +50,6 @@ __all__ = [
     "is_logged_in",
     "reset_tick_state",
     "check_tick_end_conditions",
-    "run_tick_end_script",
     "type_tool",
     "wait_tool",
     "close_tool",

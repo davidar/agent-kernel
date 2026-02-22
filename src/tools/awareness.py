@@ -4,12 +4,10 @@ login() runs the configured startup command in tty 0 and returns the output.
 Tick-end conditions are checked by the harness (agent.py) — no logout tool.
 
 Kernel checks: login called, TTYs closed.
-Data repo checks: delegated to system/tick-end-check script (see run_tick_end_script).
+Data repo checks: delegated to pre-stop hooks (system/hooks/pre-stop/).
 """
 
-import asyncio
 import json
-import os
 from typing import Any
 
 from claude_agent_sdk import tool
@@ -64,40 +62,6 @@ def check_tick_end_conditions() -> list[str]:
         pass
 
     return issues
-
-
-async def run_tick_end_script(env: dict[str, str]) -> list[str]:
-    """Run the data repo's tick-end check script.
-
-    Returns list of issue strings (one per stdout line).
-    Returns empty list if script doesn't exist or fails (fail-open).
-    """
-    script_path = data_dir() / "system" / "tick-end-check"
-
-    if not script_path.exists() or not os.access(script_path, os.X_OK):
-        return []
-
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            str(script_path),
-            env={**os.environ, "DATA_DIR": str(data_dir()), **env},
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
-
-        if proc.returncode != 0:
-            stderr_text = stderr.decode().strip()
-            logger.warning("tick-end-check exited %d: %s", proc.returncode, stderr_text)
-            return []
-
-        return [line.strip() for line in stdout.decode().splitlines() if line.strip()]
-    except asyncio.TimeoutError:
-        logger.warning("tick-end-check timed out (30s)")
-        return []
-    except Exception as e:
-        logger.warning("tick-end-check failed: %s", e)
-        return []
 
 
 def _load_startup_config() -> dict:
