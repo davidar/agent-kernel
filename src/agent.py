@@ -65,6 +65,7 @@ logger = get_logger(__name__)
 # can hang indefinitely with no timeout and no error.
 # See: anthropics/claude-code#8980, #11650, #12113
 TOOL_CALL_TIMEOUT = 300  # 5 minutes — generous; normal tool calls complete in seconds
+MAX_TOOL_INTERRUPTS = 3  # per tick — avoid infinite interrupt loops
 
 # Retry configuration for transient API errors (500, rate limit, overloaded)
 # Exponential backoff: 10s, 20s, 40s, 80s, 160s, 320s, 600s, 600s, ...
@@ -263,6 +264,7 @@ async def run_tick():
     )
 
     api_retries = 0
+    tool_interrupts = 0
     error_detector = ErrorDetector()
     context_warning_sent = False
     last_assistant_text = ""
@@ -292,8 +294,30 @@ async def run_tick():
                 except StopAsyncIteration:
                     break
                 except asyncio.TimeoutError:
-                    logger.warning("Tool call hung — no message for %ds. Terminating tick.", TOOL_CALL_TIMEOUT)
-                    break
+                    tool_interrupts += 1
+                    if tool_interrupts > MAX_TOOL_INTERRUPTS:
+                        logger.warning(
+                            "Tool call hung — no message for %ds. Max interrupts (%d) exhausted. Terminating tick.",
+                            TOOL_CALL_TIMEOUT,
+                            MAX_TOOL_INTERRUPTS,
+                        )
+                        break
+                    logger.warning(
+                        "Tool call hung — no message for %ds. Sending interrupt (%d/%d).",
+                        TOOL_CALL_TIMEOUT,
+                        tool_interrupts,
+                        MAX_TOOL_INTERRUPTS,
+                    )
+                    try:
+                        await asyncio.wait_for(client.interrupt(), timeout=30)
+                    except Exception as exc:
+                        logger.warning("Interrupt failed: %s. Terminating tick.", exc)
+                        break
+                    await client.query(
+                        f"[System: A tool call was unresponsive for {TOOL_CALL_TIMEOUT}s "
+                        "and was interrupted. Continue without it.]"
+                    )
+                    continue
                 except Exception as e:
                     logger.warning("SDK message stream error: %s. Terminating tick.", e)
                     break
