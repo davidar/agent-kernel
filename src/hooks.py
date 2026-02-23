@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .config import data_dir
 from .logging_config import get_logger
+from .notifications import send_crash_notification
 
 logger = get_logger(__name__)
 
@@ -51,21 +52,25 @@ def _run_script(
             text=True,
         )
         if result.returncode != 0:
+            stderr = result.stderr.strip()[:500]
             logger.warning(
                 "Hook %s/%s failed (exit %d): %s",
                 hook_type,
                 script.name,
                 result.returncode,
-                result.stderr.strip()[:500],
+                stderr,
             )
+            send_crash_notification(f"Hook {hook_type}/{script.name} failed (exit {result.returncode})\n{stderr}")
             return None
         logger.debug("Hook %s/%s ok", hook_type, script.name)
         return result
     except subprocess.TimeoutExpired:
         logger.warning("Hook %s/%s timed out after %ds", hook_type, script.name, timeout)
+        send_crash_notification(f"Hook {hook_type}/{script.name} timed out after {timeout}s")
         return None
-    except Exception:
+    except Exception as exc:
         logger.exception("Hook %s/%s error", hook_type, script.name)
+        send_crash_notification(f"Hook {hook_type}/{script.name} error: {exc}")
         return None
 
 
