@@ -5,7 +5,7 @@ through the terminal multiplexer (type/wait/close) and the SDK's built-in file
 tools (Read/Grep/Glob) on TTY log files.
 
 Custom tools: login, type, wait, close
-SDK built-ins: Read, Write, Edit, Glob, Grep, WebSearch, WebFetch, TodoWrite, Task
+SDK built-ins: Read, Write, Edit, Glob, Grep, TodoWrite, Skill
 """
 
 from claude_agent_sdk import create_sdk_mcp_server

@@ -10,7 +10,6 @@ from pathlib import Path
 from claude_agent_sdk import (
     ClaudeSDKClient,
     ClaudeAgentOptions,
-    AgentDefinition,
     AssistantMessage,
     TextBlock,
     ToolUseBlock,
@@ -60,12 +59,6 @@ _mp.parse_message = _patched_parse
 # Logger is configured lazily - either by main() or by watcher
 logger = get_logger(__name__)
 
-
-# Workaround for Claude Code bug: WebFetch (and potentially other built-in tools)
-# can hang indefinitely with no timeout and no error.
-# See: anthropics/claude-code#8980, #11650, #12113
-TOOL_CALL_TIMEOUT = 300  # 5 minutes — generous; normal tool calls complete in seconds
-MAX_TOOL_INTERRUPTS = 3  # per tick — avoid infinite interrupt loops
 
 # Retry configuration for transient API errors (500, rate limit, overloaded)
 # Exponential backoff: 10s, 20s, 40s, 80s, 160s, 320s, 600s, 600s, ...
@@ -122,27 +115,6 @@ def _get_system_prompt() -> str:
         _cached_prompt = prompt_file.read_text().strip() if prompt_file.exists() else ""
         _cached_prompt_mtime = prompt_mtime
     return _cached_prompt
-
-
-def _load_agents(agent_config: dict) -> dict[str, AgentDefinition]:
-    """Load subagent definitions from data repo JSON, with empty fallback."""
-    agents_file = data_dir() / "system" / "agents.json"
-    if not agents_file.exists():
-        return {}
-    try:
-        raw = json.loads(agents_file.read_text())
-        result = {}
-        for name, defn in raw.items():
-            result[name] = AgentDefinition(
-                description=defn.get("description", ""),
-                prompt=defn.get("prompt", ""),
-                tools=defn.get("tools", []),
-                model=defn.get("model"),
-            )
-        return result
-    except (OSError, json.JSONDecodeError, KeyError) as e:
-        logger.warning("Failed to load agents from %s: %s", agents_file, e)
-        return {}
 
 
 def _write_pause_file(tick_number: int, reason: str) -> Path:
@@ -217,8 +189,6 @@ async def run_tick():
         container=container_name,
     )
 
-    agents = _load_agents(agent_config)
-
     # Context limit enforcement: PreCompact hook blocks compaction and sets flag
     # to end the tick immediately (instead of losing mid-tick context).
     context_limit_hit = False
@@ -239,14 +209,9 @@ async def run_tick():
             "Edit",
             "Glob",
             "Grep",
-            "NotebookEdit",
-            "WebSearch",
-            "WebFetch",
             "TodoWrite",
-            "Task",
             "Skill",
         ],
-        agents=agents,
         permission_mode="acceptEdits",
         disallowed_tools=["Bash", "BashOutput", "KillBash"],
         cwd=str(data_dir()),
@@ -264,7 +229,6 @@ async def run_tick():
     )
 
     api_retries = 0
-    tool_interrupts = 0
     error_detector = ErrorDetector()
     context_warning_sent = False
     last_assistant_text = ""
@@ -290,34 +254,9 @@ async def run_tick():
             message_iter = client.receive_messages().__aiter__()
             while True:
                 try:
-                    message = await asyncio.wait_for(message_iter.__anext__(), timeout=TOOL_CALL_TIMEOUT)
+                    message = await message_iter.__anext__()
                 except StopAsyncIteration:
                     break
-                except asyncio.TimeoutError:
-                    tool_interrupts += 1
-                    if tool_interrupts > MAX_TOOL_INTERRUPTS:
-                        logger.warning(
-                            "Tool call hung — no message for %ds. Max interrupts (%d) exhausted. Terminating tick.",
-                            TOOL_CALL_TIMEOUT,
-                            MAX_TOOL_INTERRUPTS,
-                        )
-                        break
-                    logger.warning(
-                        "Tool call hung — no message for %ds. Sending interrupt (%d/%d).",
-                        TOOL_CALL_TIMEOUT,
-                        tool_interrupts,
-                        MAX_TOOL_INTERRUPTS,
-                    )
-                    try:
-                        await asyncio.wait_for(client.interrupt(), timeout=30)
-                    except Exception as exc:
-                        logger.warning("Interrupt failed: %s. Terminating tick.", exc)
-                        break
-                    await client.query(
-                        f"[System: A tool call was unresponsive for {TOOL_CALL_TIMEOUT}s "
-                        "and was interrupted. Continue without it.]"
-                    )
-                    continue
                 except Exception as e:
                     logger.warning("SDK message stream error: %s. Terminating tick.", e)
                     break

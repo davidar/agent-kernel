@@ -15,6 +15,7 @@ Container naming: agent-kernel-{name}
 
 import asyncio
 import hashlib
+from pathlib import Path
 
 from .config import data_dir, get_container_name
 from .logging_config import get_logger
@@ -171,10 +172,22 @@ async def create_container(
     (dd / "system" / "notifications").mkdir(parents=True, exist_ok=True)
 
     resolved = str(dd.resolve())
+    claude_dir = Path.home() / ".claude"
+    claude_json = Path.home() / ".claude.json"
     volumes = [
         "--volume",
         f"{resolved}:{resolved}:Z,rw",
     ]
+    if claude_dir.is_dir():
+        volumes += [
+            "--volume",
+            f"{claude_dir}:/root/.claude:z,rw",
+        ]
+    if claude_json.is_file():
+        volumes += [
+            "--volume",
+            f"{claude_json}:/root/.claude.json:z,rw",
+        ]
 
     rc, stdout, stderr = await _run(
         "podman",

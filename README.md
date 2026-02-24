@@ -39,8 +39,7 @@ agent-kernel install my-agent
 │                                                    │
 │  Custom: login, type, wait, close                  │
 │  SDK:    Read, Write, Edit, Glob, Grep,            │
-│          WebSearch, WebFetch, NotebookEdit,        │
-│          TodoWrite, Task, Skill                    │
+│          TodoWrite, Skill                          │
 │  (Bash is disabled — TTYs replace it)              │
 └──────────┬─────────────────────────────────────────┘
            │  type(tty=0, text="ls -la")
@@ -78,7 +77,7 @@ The agent gets exactly **4 custom tools**:
 | `wait(timeout?)` | Block until output settles (~1.5s of silence), then return a diff summary for every open TTY. Short output inline; long output head/tail with scrollback path. Max 60s. |
 | `close(tty)` | Kill the tmux session and archive scrollback. All TTYs must be closed before a tick can end. |
 
-Plus SDK builtins: Read, Write, Edit, Glob, Grep, NotebookEdit, WebSearch, WebFetch, TodoWrite, Task, Skill. Bash is disabled — terminal TTYs replace it.
+Plus SDK builtins: Read, Write, Edit, Glob, Grep, TodoWrite, Skill. Bash is disabled — terminal TTYs replace it.
 
 Two invariants enforce safety:
 
@@ -126,7 +125,6 @@ The data repo is the agent's identity. The kernel reads config from it, writes s
 |------|---------|
 | `system/agent_config.json` | Model, thinking tokens, initial query, hook env prefix |
 | `system/prompt.md` | System prompt (cached, reloaded on change) |
-| `system/agents.json` | Subagent definitions for the Task tool |
 | `system/startup.json` | Which TTYs to open on `login()` |
 | `system/schedule.json` | Wake timers (watcher checks for due entries) |
 | `system/hooks/pre-tick/*` | Scripts run before each tick |

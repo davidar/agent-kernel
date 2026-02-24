@@ -9,7 +9,7 @@ A portable runtime for persistent Claude agents. Each agent is an identity livin
 The agent interacts with the world through **numbered terminal TTYs** in a container, using `type`/`wait` tools and CLI programs. The shift is from "agent that calls APIs" to "agent that inhabits a computer."
 
 **Key components:**
-- **4 custom tools** (`login`, `type`, `wait`, `close`) + SDK built-ins (Read, Write, Edit, Glob, Grep, NotebookEdit, WebSearch, WebFetch, TodoWrite, Task, Skill)
+- **4 custom tools** (`login`, `type`, `wait`, `close`) + SDK built-ins (Read, Write, Edit, Glob, Grep, TodoWrite, Skill)
 - **TTY manager** (`src/tty.py`): tmux-backed TTYs in the container. Output captured via capture-pane, input via send-keys. Continuous capture loop writes per-TTY files. Diff tracking via high-water marks — observe-before-act pattern.
 - **Container** (`agent-kernel-{name}`): Persistent podman container. Named after the registered instance. Managed by `src/container.py`.
 - **Shared filesystem**: Data repo mounted into container
@@ -29,7 +29,6 @@ The agent interacts with the world through **numbered terminal TTYs** in a conta
 - **Mid-tick notifications**: TickWatcher (`src/tick_watcher.py`) watches notification files, delivers via `client.query()`
 - **Per-tick transcript**: SDK session transcript copied to `system/logs/tick-NNN.jsonl` at tick end
 - **Error handling**: `ErrorDetector` (`src/errors.py`) classifies API errors. Transient errors retry with exponential backoff. Fatal errors create `system/paused` to prevent crash loops.
-- **Tool call timeout**: 300s watchdog detects hung SDK tool calls
 
 **SDK mid-conversation injection:**
 - `client.query()` injects messages anytime during a session
@@ -111,7 +110,7 @@ tests/
 
 ### SDK Built-in Tools
 
-Read, Write, Edit, Glob, Grep, NotebookEdit, WebSearch, WebFetch, TodoWrite, Task, Skill. Path-restricted to data repo. Bash is disabled — terminal TTYs replace it.
+Read, Write, Edit, Glob, Grep, TodoWrite, Skill. Path-restricted to data repo. Bash is disabled — terminal TTYs replace it. Web search and fetching are done via CLI tools in the container (e.g. `ddgr`, `trafilatura`, `w3m`) — the agent installs these in its Containerfile.
 
 ### TTY Details
 
