@@ -212,8 +212,17 @@ async def run_tick():
             "TodoWrite",
             "Skill",
         ],
+        disallowed_tools=[
+            "Bash",
+            "BashOutput",
+            "KillBash",
+            "WebSearch",
+            "WebFetch",
+            "NotebookEdit",
+            "Task",
+            "AskUserQuestion",
+        ],
         permission_mode="acceptEdits",
-        disallowed_tools=["Bash", "BashOutput", "KillBash"],
         cwd=str(data_dir()),
         add_dirs=[
             str(Path(__file__).parent),  # src/ (kernel source)
