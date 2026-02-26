@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from src.tools.awareness import check_tick_end_conditions
 from src.tools.terminal import type_tool
 from src.tty import TTY, TTYManager
 
@@ -151,6 +152,73 @@ class TestPointAndCall:
             mgr.send_keys = AsyncMock()
             result = await type_tool.handler({"tty": 0, "text": "ls", "expect": "bash"})
             assert result.get("is_error") is not True
+
+
+class TestTickEndConditions:
+    """Test that tick-end checks ignore dead TTYs."""
+
+    def _make_manager(self, tmp_path):
+        sessions_dir = tmp_path / "sessions"
+        sessions_dir.mkdir()
+        return TTYManager(sessions_dir=sessions_dir)
+
+    def test_dead_tty_does_not_block_tick_end(self, tmp_path):
+        """Dead TTYs don't appear in tick-end blocking issues."""
+        mgr = self._make_manager(tmp_path)
+        tty = TTY(0, mgr.sessions_dir)
+        tty.process_dead = True
+        tty.exit_code = 0
+        mgr.ttys[0] = tty
+
+        with (
+            patch("src.tools.awareness.is_logged_in", return_value=True),
+            patch("src.tools.awareness._tick") as mock_tick,
+            patch("src.tools.awareness.get_tty_manager", return_value=mgr),
+        ):
+            mock_tick.logged_in = True
+            issues = check_tick_end_conditions()
+            assert issues == []
+
+    def test_live_tty_blocks_tick_end(self, tmp_path):
+        """Live TTYs still block tick end."""
+        mgr = self._make_manager(tmp_path)
+        tty = TTY(0, mgr.sessions_dir)
+        tty.process_dead = False
+        mgr.ttys[0] = tty
+
+        with (
+            patch("src.tools.awareness.is_logged_in", return_value=True),
+            patch("src.tools.awareness._tick") as mock_tick,
+            patch("src.tools.awareness.get_tty_manager", return_value=mgr),
+        ):
+            mock_tick.logged_in = True
+            issues = check_tick_end_conditions()
+            assert len(issues) == 1
+            assert "Open TTYs" in issues[0]
+
+    def test_mixed_live_and_dead(self, tmp_path):
+        """Only live TTYs are listed in tick-end issues."""
+        mgr = self._make_manager(tmp_path)
+
+        dead = TTY(0, mgr.sessions_dir)
+        dead.process_dead = True
+        dead.exit_code = 0
+        mgr.ttys[0] = dead
+
+        alive = TTY(1, mgr.sessions_dir)
+        alive.process_dead = False
+        mgr.ttys[1] = alive
+
+        with (
+            patch("src.tools.awareness.is_logged_in", return_value=True),
+            patch("src.tools.awareness._tick") as mock_tick,
+            patch("src.tools.awareness.get_tty_manager", return_value=mgr),
+        ):
+            mock_tick.logged_in = True
+            issues = check_tick_end_conditions()
+            assert len(issues) == 1
+            assert "1" in issues[0]
+            assert "0" not in issues[0]
 
 
 class TestTerminalToolLogic:

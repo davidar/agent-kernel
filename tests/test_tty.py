@@ -481,6 +481,104 @@ class TestBufferShift:
         assert tty.get_new_lines() == ["D", "E", "F", "G"]
 
 
+class TestAutoCloseDead:
+    """Test that wait_for_activity auto-closes dead TTYs.
+
+    These are unit tests (no container), so _capture_tty is patched to
+    avoid podman calls during the settle loop.
+    """
+
+    @staticmethod
+    async def _noop_capture(tty):
+        return False
+
+    async def test_dead_tty_removed_after_wait(self, sessions_dir):
+        """Dead TTYs are removed from manager after wait reports them."""
+        mgr = TTYManager(sessions_dir=sessions_dir)
+        mgr._capture_tty = self._noop_capture
+        tty = TTY(0, sessions_dir)
+        tty.tty_dir.mkdir(parents=True)
+        tty.previous_lines = ["output", "done"]
+        tty.process_dead = True
+        tty.exit_code = 0
+        mgr.ttys[0] = tty
+
+        summary = await mgr.wait_for_activity(timeout=1)
+        assert "process exited" in summary
+        assert 0 not in mgr.ttys
+
+    async def test_dead_tty_archived_after_wait(self, sessions_dir):
+        """Dead TTY directory is archived after wait."""
+        archive_dir = sessions_dir.parent / "archive"
+        mgr = TTYManager(sessions_dir=sessions_dir, archive_dir=archive_dir)
+        mgr._capture_tty = self._noop_capture
+        tty = TTY(0, sessions_dir)
+        tty.tty_dir.mkdir(parents=True)
+        tty.scrollback_file.write_text("final output\n")
+        tty.previous_lines = ["final output"]
+        tty.process_dead = True
+        tty.exit_code = 0
+        mgr.ttys[0] = tty
+
+        await mgr.wait_for_activity(timeout=1)
+        assert not tty.tty_dir.exists()
+        assert archive_dir.exists()
+
+    async def test_live_tty_not_closed(self, sessions_dir):
+        """Live TTYs survive wait even when a dead one is auto-closed."""
+        mgr = TTYManager(sessions_dir=sessions_dir)
+        mgr._capture_tty = self._noop_capture
+
+        dead = TTY(0, sessions_dir)
+        dead.tty_dir.mkdir(parents=True)
+        dead.previous_lines = ["bye"]
+        dead.process_dead = True
+        dead.exit_code = 0
+        mgr.ttys[0] = dead
+
+        alive = TTY(1, sessions_dir)
+        alive.tty_dir.mkdir(parents=True)
+        alive.previous_lines = ["prompt"]
+        alive.mark_seen()
+        mgr.ttys[1] = alive
+
+        await mgr.wait_for_activity(timeout=1)
+        assert 0 not in mgr.ttys
+        assert 1 in mgr.ttys
+
+    async def test_summary_includes_dead_before_removal(self, sessions_dir):
+        """The summary reports the exit before the TTY is removed."""
+        mgr = TTYManager(sessions_dir=sessions_dir)
+        mgr._capture_tty = self._noop_capture
+        tty = TTY(0, sessions_dir)
+        tty.tty_dir.mkdir(parents=True)
+        tty.previous_lines = ["error: something broke"]
+        tty.process_dead = True
+        tty.exit_code = 1
+        mgr.ttys[0] = tty
+
+        summary = await mgr.wait_for_activity(timeout=1)
+        assert "process exited (code 1)" in summary
+        assert "error: something broke" in summary
+        # But TTY is gone now
+        assert 0 not in mgr.ttys
+
+    async def test_no_build_summary_skips_autoclose(self, sessions_dir):
+        """When build_summary=False, dead TTYs are NOT auto-closed."""
+        mgr = TTYManager(sessions_dir=sessions_dir)
+        mgr._capture_tty = self._noop_capture
+        tty = TTY(0, sessions_dir)
+        tty.tty_dir.mkdir(parents=True)
+        tty.previous_lines = ["done"]
+        tty.process_dead = True
+        tty.exit_code = 0
+        mgr.ttys[0] = tty
+
+        await mgr.wait_for_activity(timeout=1, build_summary=False)
+        # Still there — login() uses build_summary=False and manages TTYs itself
+        assert 0 in mgr.ttys
+
+
 class TestTTYTmuxIntegration:
     """Integration tests for tmux-backed TTYs (requires podman)."""
 

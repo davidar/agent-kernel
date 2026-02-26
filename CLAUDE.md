@@ -106,7 +106,7 @@ tests/
 
 **`wait(timeout?)`** — Block until output settles (~1.5s of silence). Returns diff summary for all open TTYs. Max 60s. **Tip:** Call `type()` + `wait()` as parallel tool calls.
 
-**`close(tty)`** — Kill and archive a TTY. All must be closed before tick ends.
+**`close(tty)`** — Kill and archive a TTY. Dead TTYs (process exited) are auto-closed after `wait()` reports their exit. Live TTYs must be closed before tick ends.
 
 ### SDK Built-in Tools
 
@@ -120,6 +120,7 @@ Read, Write, Edit, Glob, Grep, TodoWrite, Skill. Path-restricted to data repo. B
 - Per-TTY files in `tmp/sessions/tty_N/`: `screen`, `screen.ansi`, `raw`, `scrollback`, `status`
 - `tmp/sessions/registry.json` — metadata flushed on every lifecycle event
 - Archives saved to `system/logs/sessions/` as `tty_N-tick-NNN`
+- Dead TTYs (process exited) auto-close after `wait()` reports them
 
 **Diff tracking:**
 - Capture loop runs every 0.5s. High-water marks track agent's last observation.

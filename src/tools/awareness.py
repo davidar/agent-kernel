@@ -54,9 +54,9 @@ def check_tick_end_conditions() -> list[str]:
 
     try:
         mgr = get_tty_manager()
-        open_ttys = list(mgr.ttys.keys())
-        if open_ttys:
-            tty_list = ", ".join(str(t) for t in sorted(open_ttys))
+        live_ttys = [tid for tid, tty in mgr.ttys.items() if not tty.process_dead]
+        if live_ttys:
+            tty_list = ", ".join(str(t) for t in sorted(live_ttys))
             issues.append(f"Open TTYs: {tty_list}. Close them with close(tty=N) or exit the shell.")
     except RuntimeError:
         pass

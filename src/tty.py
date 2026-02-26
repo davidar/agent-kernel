@@ -334,6 +334,15 @@ class TTYManager:
             return ""
 
         summary = self.build_tty_status_summary()
+
+        # Auto-close dead TTYs after reporting their exit to the agent
+        dead_ids = [tid for tid, tty in self.ttys.items() if tty.process_dead]
+        for tid in dead_ids:
+            try:
+                await self.close_tty(tid)
+            except Exception as e:
+                logger.warning("Auto-close TTY %d failed: %s", tid, e)
+
         return summary or "No activity, timeout reached."
 
     def build_tty_status_summary(self) -> str:
