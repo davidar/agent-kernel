@@ -108,7 +108,7 @@ class TestTTYManager:
             tty = TTY(i, tty_env)
             mgr.ttys[i] = tty
 
-        with pytest.raises(RuntimeError, match="TTY limit reached"):
+        with pytest.raises(RuntimeError, match="Terminal limit reached"):
             await mgr.get_or_create_tty(MAX_TTYS)
 
         await mgr.close_all()
@@ -151,7 +151,7 @@ class TestTTYStatusSummary:
         mgr.ttys[0] = tty
 
         summary = mgr.build_tty_status_summary()
-        assert "[tty 0: bash]" in summary
+        assert "[terminal 0: bash]" in summary
         assert "3 new lines:" in summary
         assert "echo hello" in summary
         assert "hello" in summary
@@ -163,7 +163,7 @@ class TestTTYStatusSummary:
         mgr.ttys[0] = tty
 
         summary = mgr.build_tty_status_summary()
-        assert "[tty 0: bash]" in summary
+        assert "[terminal 0: bash]" in summary
         assert "50 new lines" in summary
         assert "lines omitted" in summary
         # Head should have first lines
@@ -228,9 +228,9 @@ class TestTTYStatusSummary:
         mgr.ttys[2] = tty2
 
         summary = mgr.build_tty_status_summary()
-        assert "[tty 0: bash]" in summary
-        assert "[tty 1: bash] no change" in summary
-        assert "[tty 2: bash]" in summary
+        assert "[terminal 0: bash]" in summary
+        assert "[terminal 1: bash] no change" in summary
+        assert "[terminal 2: bash]" in summary
         assert "output from tty 0" in summary
         assert "output from tty 2" in summary
 
@@ -385,7 +385,7 @@ class TestTTYLabel:
         tty.previous_lines = ["output"]
         mgr.ttys[0] = tty
         summary = mgr.build_tty_status_summary()
-        assert "[tty 0: npm]" in summary
+        assert "[terminal 0: npm]" in summary
 
 
 class TestTmuxKeyDetection:
@@ -658,7 +658,7 @@ class TestTTYTmuxIntegration:
         # Now there should be new output
         summary2 = tmux_tty_manager.build_tty_status_summary()
         assert "diff-test" in summary2
-        assert "[tty 0:" in summary2
+        assert "[terminal 0:" in summary2
 
         # After building summary, output is marked as seen
         summary3 = tmux_tty_manager.build_tty_status_summary()

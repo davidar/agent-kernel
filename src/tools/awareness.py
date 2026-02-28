@@ -14,7 +14,7 @@ from claude_agent_sdk import tool
 
 from ..config import data_dir
 from ..logging_config import get_logger
-from ..tty import get_tty_manager
+from ..tty import MAX_TTYS, get_tty_manager
 
 logger = get_logger(__name__)
 
@@ -57,7 +57,7 @@ def check_tick_end_conditions() -> list[str]:
         live_ttys = [tid for tid, tty in mgr.ttys.items() if not tty.process_dead]
         if live_ttys:
             tty_list = ", ".join(str(t) for t in sorted(live_ttys))
-            issues.append(f"Open TTYs: {tty_list}. Close them with close(tty=N) or exit the shell.")
+            issues.append(f"Open terminals: {tty_list}. Close them with close(tty=N) or exit the shell.")
     except RuntimeError:
         pass
 
@@ -91,7 +91,7 @@ def _format_lost_ttys(tty_mgr) -> str | None:
         scrollback_note = " (scrollback saved to scrollback.prev)" if lt.get("has_scrollback") else ""
         parts.append(f"  - {lt['name']} ({lt['command']}){scrollback_note}")
     tty_mgr.cleanup_stale()
-    return "Lost TTYs (container restarted):\n" + "\n".join(parts)
+    return "Lost terminals (container restarted):\n" + "\n".join(parts)
 
 
 async def _launch_startup_ttys(tty_mgr) -> list[str]:
@@ -126,12 +126,19 @@ async def _launch_startup_ttys(tty_mgr) -> list[str]:
             if new_lines:
                 other_parts.append(tty_mgr._format_tty_diff(tid, new_lines))
             else:
-                other_parts.append(f"[tty {tid}: {tty_mgr._tty_label(tty)}] no change")
+                other_parts.append(f"[terminal {tid}: {tty_mgr._tty_label(tty)}] no change")
         sections.append("\n".join(other_parts))
 
     # Mark all seen so first type() doesn't fail
     for tty in tty_mgr.ttys.values():
         tty.mark_seen()
+
+    # Capacity line
+    tty_parts = []
+    for tid in sorted(tty_mgr.ttys.keys()):
+        tty_parts.append(f"{tid} ({tty_mgr._tty_label(tty_mgr.ttys[tid])})")
+    remaining = MAX_TTYS - len(tty_mgr.ttys)
+    sections.append(f"Terminals: {', '.join(tty_parts)} — {remaining} more available (use open() to create)")
 
     return sections
 
@@ -171,7 +178,7 @@ async def login(args: dict[str, Any]) -> dict[str, Any]:
         sections.extend(tty_sections)
 
     except Exception as e:
-        sections.append(f"(TTY setup error: {e})")
+        sections.append(f"(Terminal setup error: {e})")
 
     return {
         "content": [

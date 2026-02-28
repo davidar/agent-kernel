@@ -1,7 +1,7 @@
-"""Terminal multiplexer tools — type and wait.
+"""Terminal multiplexer tools — open, type, wait, close.
 
-Only two custom tools. Everything else uses the SDK's built-in tools
-(Read, Grep, Glob) on the TTY log files.
+The agent interacts with terminals via these tools. Everything else uses
+the SDK's built-in tools (Read, Grep, Glob) on the terminal log files.
 """
 
 from __future__ import annotations
@@ -10,28 +10,65 @@ from typing import Any
 
 from claude_agent_sdk import tool
 
-from ..tty import _is_tmux_key, get_tty_manager
+from ..tty import MAX_TTYS, _is_tmux_key, get_tty_manager
 from .awareness import is_logged_in
 
 
 @tool(
+    "open",
+    """Open a new terminal. Use this to run things in parallel — long builds,
+background servers, separate interactive sessions. Returns the terminal
+number to use with type() and close().
+
+Default command is bash. Pass a command to launch it directly
+(e.g. open(command="python3")).""",
+    {
+        "type": "object",
+        "properties": {
+            "command": {"type": "string"},
+        },
+    },
+)
+async def open_tool(args: dict[str, Any]) -> dict[str, Any]:
+    """Open a new terminal."""
+    if not is_logged_in():
+        return _error("You must call login() first before using terminal tools.")
+
+    command = args.get("command", "bash")
+    manager = get_tty_manager()
+
+    try:
+        # Find next available ID
+        tty_id = next(i for i in range(MAX_TTYS) if i not in manager.ttys)
+    except StopIteration:
+        return _error(f"Terminal limit reached ({MAX_TTYS}).")
+
+    try:
+        await manager.get_or_create_tty(tty_id, command=command)
+        remaining = MAX_TTYS - len(manager.ttys)
+        return _text(f"Opened terminal {tty_id} ({command}). {remaining} more available.")
+    except RuntimeError as e:
+        return _error(str(e))
+    except Exception as e:
+        return _error(f"Failed to open terminal: {e}")
+
+
+@tool(
     "type",
-    """Send keystrokes to a terminal TTY.
+    """Send keystrokes to a terminal.
 
 For literal text, just pass the string — Enter is sent automatically after
 literal text. For control characters, use tmux key name syntax: "Enter"
 for return, "C-c" for Ctrl-C, "C-d" for EOF, "Tab" for tab, "Up"/"Down"
 for arrow keys, etc.
 
-TTYs are auto-created on first use (default: bash shell).
-
 IMPORTANT: You must specify `expect` — the command you believe is currently
-running in this TTY (e.g. "bash", "chat", "bsky", "python3"). This is a
-point-and-call safety check: the tool will fail if the actual running
+running in this terminal (e.g. "bash", "chat", "bsky", "python3"). This is
+a point-and-call safety check: the tool will fail if the actual running
 command doesn't match, preventing you from accidentally sending keystrokes
 to the wrong process.
 
-IMPORTANT: This tool will fail if any TTY has unseen output. You must
+IMPORTANT: This tool will fail if any terminal has unseen output. You must
 call wait() first to observe terminal output before sending more input.
 
 Examples:
@@ -51,7 +88,7 @@ Examples:
     },
 )
 async def type_tool(args: dict[str, Any]) -> dict[str, Any]:
-    """Send keystrokes to a terminal TTY."""
+    """Send keystrokes to a terminal."""
     if not is_logged_in():
         return _error("You must call login() first before using terminal tools.")
 
@@ -62,25 +99,26 @@ async def type_tool(args: dict[str, Any]) -> dict[str, Any]:
     if not text:
         return _error("text is required")
     if not expect:
-        return _error("expect is required — state what command you think is running in this TTY")
+        return _error("expect is required — state what command you think is running in this terminal")
 
     manager = get_tty_manager()
 
-    # Observe-before-act: fail if any TTY has unseen output
+    # Observe-before-act: fail if any terminal has unseen output
     if manager.has_unseen_changes():
-        return _error(
-            "Terminal TTYs have unseen output. Call wait() first to observe output before sending more input."
-        )
+        return _error("Terminals have unseen output. Call wait() first to observe output before sending more input.")
+
+    # Terminal must exist (created by login() or open())
+    if tty_id not in manager.ttys:
+        return _error(f"Terminal {tty_id} does not exist. Use open() to create a new terminal.")
 
     # Point-and-call: verify the agent's expectation matches reality
-    if tty_id in manager.ttys:
-        tty = manager.ttys[tty_id]
-        actual = tty.current_command or tty.command
-        if expect.lower() != actual.lower():
-            return _error(
-                f"Point-and-call mismatch: you expected '{expect}' but tty {tty_id} is running '{actual}'. "
-                f"Check which TTY you meant to use."
-            )
+    tty = manager.ttys[tty_id]
+    actual = tty.current_command or tty.command
+    if expect.lower() != actual.lower():
+        return _error(
+            f"Point-and-call mismatch: you expected '{expect}' but terminal {tty_id} is running '{actual}'. "
+            f"Check which terminal you meant to use."
+        )
 
     try:
         await manager.send_keys(tty_id, text)
@@ -99,15 +137,20 @@ async def type_tool(args: dict[str, Any]) -> dict[str, Any]:
 
 @tool(
     "wait",
-    """Wait for terminal output to settle, then return a summary of all TTYs.
+    """Wait for terminal output to settle, then return a summary of all terminals.
 
 This is the only way to observe terminal output. After sending input with
 type(), call wait() to see what happened. The tool blocks until output
 settles (no new output for ~1.5s) or the timeout expires.
 
-Returns a status summary for every open TTY showing new output as diffs.
-Short output is shown inline; long output shows head/tail with full
-content available in the scrollback file.
+Returns a status summary for every open terminal showing new output as
+diffs. Short output is shown inline; long output shows head/tail with
+full content in the scrollback file.
+
+To see current screen: Read("tmp/sessions/tty_N/screen")
+To read full output: Read("tmp/sessions/tty_N/scrollback")
+To search output: Grep("pattern", "tmp/sessions/")
+To discover terminals: Glob("tmp/sessions/tty_*/status")
 
 The timeout has a maximum of 60 seconds regardless of the value passed.
 
@@ -135,13 +178,13 @@ async def wait_tool(args: dict[str, Any]) -> dict[str, Any]:
 
 @tool(
     "close",
-    """Force-close a terminal TTY. Kills the running process (if any),
-archives the TTY's scrollback, and removes the TTY.
+    """Force-close a terminal. Kills the running process (if any),
+archives the scrollback, and removes the terminal.
 
 Use this when a process is stuck and can't be exited normally (e.g.
-after Ctrl-C fails), or to clean up TTYs you're done with.
+after Ctrl-C fails), or to clean up terminals you're done with.
 
-All TTYs must be closed before the tick can end.""",
+All terminals must be closed before the tick can end.""",
     {
         "type": "object",
         "properties": {
@@ -151,7 +194,7 @@ All TTYs must be closed before the tick can end.""",
     },
 )
 async def close_tool(args: dict[str, Any]) -> dict[str, Any]:
-    """Force-close a terminal TTY."""
+    """Force-close a terminal."""
     if not is_logged_in():
         return _error("You must call login() first before using terminal tools.")
 
@@ -160,9 +203,9 @@ async def close_tool(args: dict[str, Any]) -> dict[str, Any]:
     manager = get_tty_manager()
     closed = await manager.close_tty(tty_id)
     if closed:
-        return _text(f"TTY {tty_id} closed and archived.")
+        return _text(f"Terminal {tty_id} closed and archived.")
     else:
-        return _error(f"TTY {tty_id} not found.")
+        return _error(f"Terminal {tty_id} not found.")
 
 
 def _text(text: str) -> dict[str, Any]:

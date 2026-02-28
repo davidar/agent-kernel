@@ -8,7 +8,7 @@ agent-kernel gives the agent **terminal TTYs** instead — persistent tmux sessi
 
 The shift is from "agent that calls APIs" to **"agent that inhabits a computer."**
 
-The kernel is a generic runtime — it provides a tick loop, terminal multiplexing, container management, and 4 tools. It knows nothing about any particular agent. The agent's identity lives in a separate **data repo**: personality, memory, config, CLIs, container definition, hooks — everything version-controlled in git. Clone the repo, point a kernel at it, and you have the agent. The kernel is a body; the repo is a mind.
+The kernel is a generic runtime — it provides a tick loop, terminal multiplexing, container management, and 5 tools. It knows nothing about any particular agent. The agent's identity lives in a separate **data repo**: personality, memory, config, CLIs, container definition, hooks — everything version-controlled in git. Clone the repo, point a kernel at it, and you have the agent. The kernel is a body; the repo is a mind.
 
 ## Quick Start
 
@@ -37,10 +37,10 @@ agent-kernel install my-agent
 ┌────────────────────────────────────────────────────┐
 │                Agent (Claude SDK)                  │
 │                                                    │
-│  Custom: login, type, wait, close                  │
+│  Custom: login, open, type, wait, close            │
 │  SDK:    Read, Write, Edit, Glob, Grep,            │
 │          TodoWrite, Skill                          │
-│  (Bash is disabled — TTYs replace it)              │
+│  (Bash is disabled — terminals replace it)         │
 └──────────┬─────────────────────────────────────────┘
            │  type(tty=0, text="ls -la")
            │  wait() → diff of new output
@@ -68,20 +68,21 @@ agent-kernel install my-agent
 
 ### Tools
 
-The agent gets exactly **4 custom tools**:
+The agent gets exactly **5 custom tools**:
 
 | Tool | Purpose |
 |------|---------|
-| `login()` | Called first every tick. Opens TTYs per `startup.json`, reports any lost to container restart. Returns startup output. |
-| `type(tty, expect, text, enter?)` | Send keystrokes to a TTY. Auto-sends Enter for literal text; use `enter=false` to suppress. For control keys: `"C-c"`, `"Tab"`, `"Enter"`. |
-| `wait(timeout?)` | Block until output settles (~1.5s of silence), then return a diff summary for every open TTY. Short output inline; long output head/tail with scrollback path. Max 60s. |
-| `close(tty)` | Kill the tmux session and archive scrollback. All TTYs must be closed before a tick can end. |
+| `login()` | Called first every tick. Opens terminals per `startup.json`, reports any lost to container restart. Returns startup output + terminal capacity. |
+| `open(command?)` | Open a new terminal. Default command is bash. Returns terminal number + capacity. Use for parallel work — builds, servers, separate sessions. |
+| `type(tty, expect, text, enter?)` | Send keystrokes to a terminal. Auto-sends Enter for literal text; use `enter=false` to suppress. For control keys: `"C-c"`, `"Tab"`, `"Enter"`. Terminal must exist (created by `login()` or `open()`). |
+| `wait(timeout?)` | Block until output settles (~1.5s of silence), then return a diff summary for every open terminal. Short output inline; long output head/tail with scrollback path. Max 60s. |
+| `close(tty)` | Kill the tmux session and archive scrollback. All terminals must be closed before a tick can end. |
 
-Plus SDK builtins: Read, Write, Edit, Glob, Grep, TodoWrite, Skill. Bash is disabled — terminal TTYs replace it.
+Plus SDK builtins: Read, Write, Edit, Glob, Grep, TodoWrite, Skill. Bash is disabled — terminals replace it.
 
 Two invariants enforce safety:
 
-- **Observe-before-act**: `type()` refuses to send keystrokes if any TTY has unread output. The agent must call `wait()` first. This prevents acting on stale information.
+- **Observe-before-act**: `type()` refuses to send keystrokes if any terminal has unread output. The agent must call `wait()` first. This prevents acting on stale information.
 - **Point-and-call**: `type()` requires an `expect` parameter naming the command the agent believes is running (e.g. `"bash"`, `"python3"`). If the actual running command doesn't match, the call fails. This prevents sending keystrokes to the wrong process.
 
 ### Ticks
@@ -93,8 +94,8 @@ Each tick is a **stateless Claude SDK session**. No conversation history persist
 3. Container started (image rebuilt if Containerfile changed)
 4. Pre-tick hooks run inside the container (`system/hooks/pre-tick/`)
 5. Fresh SDK session starts; agent receives `initial_query`, calls `login()`
-6. Agent works through TTYs — typing commands, reading output, interacting with programs
-7. When the model produces a text response (no tool calls), tick-end conditions are checked: was `login()` called? Are all TTYs closed? Do the pre-stop hooks pass (`system/hooks/pre-stop/`)? If not, the agent is told what's blocking and continues.
+6. Agent works through terminals — typing commands, reading output, interacting with programs
+7. When the model produces a text response (no tool calls), tick-end conditions are checked: was `login()` called? Are all terminals closed? Do the pre-stop hooks pass (`system/hooks/pre-stop/`)? If not, the agent is told what's blocking and continues.
 8. Post-tick hooks run inside the container (`system/hooks/post-tick/`) with `{PREFIX}_TICK_STATUS` set to `"normal"` or `"abnormal"`
 9. Kernel runs `git push` on the host (best-effort, needs SSH keys)
 10. Transcript copied to `system/logs/tick-NNN.jsonl`, `tmp/` wiped

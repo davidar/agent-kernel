@@ -217,7 +217,7 @@ class TTYManager:
 
         # Check capacity
         if tty_id not in self.ttys and len(self.ttys) >= MAX_TTYS:
-            raise RuntimeError(f"TTY limit reached ({MAX_TTYS}).")
+            raise RuntimeError(f"Terminal limit reached ({MAX_TTYS}).")
 
         # Create new TTY
         tty = TTY(tty_id, self.sessions_dir)
@@ -365,13 +365,13 @@ class TTYManager:
                 if new_lines:
                     parts.append(self._format_tty_diff(tty_id, new_lines, exit_str))
                 else:
-                    parts.append(f"[tty {tty_id}: {self._tty_label(tty)}] {exit_str}, no new output")
+                    parts.append(f"[terminal {tty_id}: {self._tty_label(tty)}] {exit_str}, no new output")
                 tty.mark_seen()
             elif new_lines:
                 parts.append(self._format_tty_diff(tty_id, new_lines))
                 tty.mark_seen()
             else:
-                parts.append(f"[tty {tty_id}: {self._tty_label(tty)}] no change")
+                parts.append(f"[terminal {tty_id}: {self._tty_label(tty)}] no change")
 
         return "\n".join(parts)
 
@@ -381,7 +381,7 @@ class TTYManager:
         count = len(new_lines)
         label = self._tty_label(tty)
 
-        header_parts = [f"[tty {tty_id}: {label}]"]
+        header_parts = [f"[terminal {tty_id}: {label}]"]
         if prefix:
             header_parts.append(f"{prefix},")
 

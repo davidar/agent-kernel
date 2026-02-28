@@ -9,7 +9,7 @@ A portable runtime for persistent Claude agents. Each agent is an identity livin
 The agent interacts with the world through **numbered terminal TTYs** in a container, using `type`/`wait` tools and CLI programs. The shift is from "agent that calls APIs" to "agent that inhabits a computer."
 
 **Key components:**
-- **4 custom tools** (`login`, `type`, `wait`, `close`) + SDK built-ins (Read, Write, Edit, Glob, Grep, TodoWrite, Skill)
+- **5 custom tools** (`login`, `open`, `type`, `wait`, `close`) + SDK built-ins (Read, Write, Edit, Glob, Grep, TodoWrite, Skill)
 - **TTY manager** (`src/tty.py`): tmux-backed TTYs in the container. Output captured via capture-pane, input via send-keys. Continuous capture loop writes per-TTY files. Diff tracking via high-water marks — observe-before-act pattern.
 - **Container** (`agent-kernel-{name}`): Persistent podman container. Named after the registered instance. Managed by `src/container.py`.
 - **Shared filesystem**: Data repo mounted into container
@@ -77,9 +77,9 @@ src/
 ├── types.py           # Data models (State)
 ├── watcher.py         # Poll-and-tick loop, crash notifications
 └── tools/             # MCP tools (minimal surface)
-    ├── __init__.py    # Server assembly — 4 tools
+    ├── __init__.py    # Server assembly — 5 tools
     ├── awareness.py   # login + tick-end conditions
-    ├── terminal.py    # type, wait, close
+    ├── terminal.py    # open, type, wait, close
     └── schedule.py    # Wake helpers (used by watcher)
 
 tests/
@@ -98,15 +98,17 @@ tests/
 
 ## Tools
 
-### Custom MCP Tools (4)
+### Custom MCP Tools (5)
 
-**`login()`** — Call first every tick. Opens TTYs per `startup.json`, reports any TTYs lost to container restart.
+**`login()`** — Call first every tick. Opens terminals per `startup.json`, reports any terminals lost to container restart.
 
-**`type(tty, expect, text, enter?)`** — Send keystrokes to a TTY. `expect` is a point-and-call safety check — confirms what you think is running before sending keystrokes. Fails if any TTY has unseen output (observe-before-act). Auto-sends Enter for literal text; suppress with `enter=false`. For control characters: `"C-c"`, `"Tab"`, `"Enter"` (no auto-Enter).
+**`open(command?)`** — Open a new terminal. Returns terminal number + capacity. Default command is bash.
 
-**`wait(timeout?)`** — Block until output settles (~1.5s of silence). Returns diff summary for all open TTYs. Max 60s. **Tip:** Call `type()` + `wait()` as parallel tool calls.
+**`type(tty, expect, text, enter?)`** — Send keystrokes to a terminal. `expect` is a point-and-call safety check — confirms what you think is running before sending keystrokes. Fails if any terminal has unseen output (observe-before-act). Auto-sends Enter for literal text; suppress with `enter=false`. For control characters: `"C-c"`, `"Tab"`, `"Enter"` (no auto-Enter).
 
-**`close(tty)`** — Kill and archive a TTY. Dead TTYs (process exited) are auto-closed after `wait()` reports their exit. Live TTYs must be closed before tick ends.
+**`wait(timeout?)`** — Block until output settles (~1.5s of silence). Returns diff summary for all open terminals. Max 60s. **Tip:** Call `type()` + `wait()` as parallel tool calls.
+
+**`close(tty)`** — Kill and archive a terminal. Dead terminals (process exited) are auto-closed after `wait()` reports their exit. Live terminals must be closed before tick ends.
 
 ### SDK Built-in Tools
 

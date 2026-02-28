@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.tools.awareness import check_tick_end_conditions
-from src.tools.terminal import type_tool
+from src.tools.terminal import open_tool, type_tool
 from src.tty import TTY, TTYManager
 
 
@@ -62,6 +62,7 @@ class TestPointAndCall:
             result = await type_tool.handler({"tty": 1, "text": "bsky timeline", "expect": "bash"})
             assert result.get("is_error") is True
             assert "Point-and-call mismatch" in result["content"][0]["text"]
+            assert "terminal 1" in result["content"][0]["text"]
             assert "'bash'" in result["content"][0]["text"]
             assert "'chat'" in result["content"][0]["text"]
             assert not mock_manager.send_keys.called
@@ -96,16 +97,18 @@ class TestPointAndCall:
             assert result.get("is_error") is True
             assert "expect is required" in result["content"][0]["text"]
 
-    async def test_new_tty_skips_check(self, mock_manager):
-        """For a TTY that doesn't exist yet, expect check is skipped (TTY will be auto-created)."""
+    async def test_nonexistent_terminal_rejected(self, mock_manager):
+        """type() fails when the terminal doesn't exist (must use open() first)."""
         with (
             patch("src.tools.terminal.is_logged_in", return_value=True),
             patch("src.tools.terminal.get_tty_manager", return_value=mock_manager),
         ):
             mock_manager.send_keys = AsyncMock()
-            # TTY 5 doesn't exist — should succeed regardless of expect value
             result = await type_tool.handler({"tty": 5, "text": "echo hello", "expect": "bash"})
-            assert result.get("is_error") is not True
+            assert result.get("is_error") is True
+            assert "does not exist" in result["content"][0]["text"]
+            assert "open()" in result["content"][0]["text"]
+            assert not mock_manager.send_keys.called
 
     async def test_expect_uses_current_command_over_command(self, tmp_path):
         """Expect checks against current_command, not the original creation command."""
@@ -154,6 +157,66 @@ class TestPointAndCall:
             assert result.get("is_error") is not True
 
 
+class TestOpenTool:
+    """Test the open tool."""
+
+    @pytest.fixture
+    def mock_manager(self, tmp_path):
+        sessions_dir = tmp_path / "sessions"
+        sessions_dir.mkdir()
+        return TTYManager(sessions_dir=sessions_dir)
+
+    async def test_open_returns_terminal_number(self, mock_manager):
+        """open() returns the terminal number and capacity."""
+        with (
+            patch("src.tools.terminal.is_logged_in", return_value=True),
+            patch("src.tools.terminal.get_tty_manager", return_value=mock_manager),
+        ):
+            mock_manager.get_or_create_tty = AsyncMock()
+            result = await open_tool.handler({})
+            assert result.get("is_error") is not True
+            text = result["content"][0]["text"]
+            assert "Opened terminal 0" in text
+            assert "more available" in text
+
+    async def test_open_with_command(self, mock_manager):
+        """open(command='python3') passes the command through."""
+        with (
+            patch("src.tools.terminal.is_logged_in", return_value=True),
+            patch("src.tools.terminal.get_tty_manager", return_value=mock_manager),
+        ):
+            mock_manager.get_or_create_tty = AsyncMock()
+            result = await open_tool.handler({"command": "python3"})
+            assert result.get("is_error") is not True
+            assert "python3" in result["content"][0]["text"]
+            mock_manager.get_or_create_tty.assert_called_once_with(0, command="python3")
+
+    async def test_open_skips_occupied_ids(self, mock_manager):
+        """open() finds the next available ID."""
+        # Occupy terminal 0
+        tty0 = TTY(0, mock_manager.sessions_dir)
+        mock_manager.ttys[0] = tty0
+
+        with (
+            patch("src.tools.terminal.is_logged_in", return_value=True),
+            patch("src.tools.terminal.get_tty_manager", return_value=mock_manager),
+        ):
+            mock_manager.get_or_create_tty = AsyncMock()
+            result = await open_tool.handler({})
+            assert result.get("is_error") is not True
+            assert "Opened terminal 1" in result["content"][0]["text"]
+
+    async def test_open_requires_login(self, mock_manager):
+        """open() fails if login() hasn't been called."""
+        with (
+            patch("src.tools.terminal.is_logged_in", return_value=False),
+            patch("src.tools.terminal.get_tty_manager", return_value=mock_manager),
+        ):
+            result = await open_tool.handler({})
+            assert result.get("is_error") is True
+            assert "login()" in result["content"][0]["text"]
+
+
 class TestTickEndConditions:
     """Test that tick-end checks ignore dead TTYs."""
 
@@ -194,7 +257,7 @@ class TestTickEndConditions:
             mock_tick.logged_in = True
             issues = check_tick_end_conditions()
             assert len(issues) == 1
-            assert "Open TTYs" in issues[0]
+            assert "Open terminals" in issues[0]
 
     def test_mixed_live_and_dead(self, tmp_path):
         """Only live TTYs are listed in tick-end issues."""
