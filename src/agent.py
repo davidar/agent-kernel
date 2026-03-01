@@ -117,20 +117,6 @@ def _get_system_prompt() -> str:
     return _cached_prompt
 
 
-def _write_pause_file(tick_number: int, reason: str) -> Path:
-    """Create a pause file to prevent crash loops after fatal errors."""
-    pause_file = data_dir() / "system" / "paused"
-    pause_file.write_text(
-        f"Paused at {datetime.now().isoformat()} due to {reason}.\n"
-        f"Tick: {tick_number}\n"
-        f"\n"
-        f"Options:\n"
-        f"1. Delete this file to retry (may fail again)\n"
-        f"2. Investigate the tick log for root cause\n"
-    )
-    return pause_file
-
-
 def _copy_tick_transcript(session_id: str, tick_number: int) -> Path | None:
     """Copy the SDK session transcript to per-tick log directory."""
     if not session_id:
@@ -322,10 +308,9 @@ async def run_tick():
                     if err:
                         logger.warning("Result error: %s (%s)", err.category, err.detection_method)
 
-                    # Fatal error → pause
+                    # Fatal error — end tick (watcher will continue)
                     if error_detector.is_fatal:
-                        _write_pause_file(tick_number, "fatal error")
-                        logger.error("FATAL error — pausing to prevent crash loop")
+                        logger.error("Fatal error detected — ending tick")
                         tick_active = False
                         break
 
@@ -446,7 +431,7 @@ async def run_tick():
         logger.error("TICK %d FAILED (%.1fs): %s: %s", tick_number, duration, err.category, err.text)
 
         if err.fatal:
-            _write_pause_file(tick_number, f"exception: {type(e).__name__}")
+            logger.error("Fatal exception — tick will not retry")
             return
 
         raise

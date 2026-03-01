@@ -24,7 +24,7 @@ agent-kernel init https://github.com/user/my-agent-data.git
 # Run one tick
 agent-kernel tick my-agent
 
-# Auto-tick on triggers and scheduled wakes
+# Auto-tick on trigger files
 agent-kernel watch my-agent
 
 # Install as systemd user service
@@ -48,7 +48,7 @@ agent-kernel install my-agent
 ┌────────────────────────────────────────────────────┐
 │              Kernel (host process)                 │
 │                                                    │
-│  Watcher      — polls for trigger files + schedule │
+│  Watcher      — polls for trigger files            │
 │  Agent runner — fresh SDK session per tick         │
 │  TTY manager  — tmux send-keys / capture-pane      │
 │  Hooks        — pre/post-tick scripts from repo    │
@@ -89,7 +89,7 @@ Two invariants enforce safety:
 
 Each tick is a **stateless Claude SDK session**. No conversation history persists between ticks — the agent maintains its own continuity through files in the data repo (notebook, memory, journals).
 
-1. Watcher detects a trigger file (`system/tick_trigger`) or a due entry in `system/schedule.json`
+1. Watcher detects a trigger file (`system/tick_trigger`)
 2. Tick count incremented in `system/state.json`
 3. Container started (image rebuilt if Containerfile changed)
 4. Pre-tick hooks run inside the container (`system/hooks/pre-tick/`)
@@ -112,7 +112,7 @@ At tick start, the kernel verifies container DNS works (rootless podman networki
 
 ### Error Handling and Recovery
 
-API errors are classified as **fatal** (prompt too long → `system/paused` file created to prevent crash loops) or **transient** (rate limit, overloaded, timeout → exponential backoff retry, up to 10 attempts). The watcher writes crash details to `system/crash_notify.txt` for external consumers.
+API errors are classified as **fatal** (prompt too long → tick ends immediately) or **transient** (rate limit, overloaded, timeout → exponential backoff retry, up to 10 attempts). The watcher writes crash details to `system/crash_notify.txt` for external consumers.
 
 Every config file the kernel reads has fallback defaults. Bad JSON, missing files, and corrupt prompts all degrade gracefully instead of crashing. The kernel never fails to start a tick due to data repo corruption — the agent always gets a chance to investigate and fix things via git.
 
@@ -127,7 +127,6 @@ The data repo is the agent's identity. The kernel reads config from it, writes s
 | `system/agent_config.json` | Model, thinking tokens, initial query, hook env prefix |
 | `system/prompt.md` | System prompt (cached, reloaded on change) |
 | `system/startup.json` | Which TTYs to open on `login()` |
-| `system/schedule.json` | Wake timers (watcher checks for due entries) |
 | `system/hooks/pre-tick/*` | Scripts run before each tick |
 | `system/hooks/pre-stop/*` | Scripts run when agent wants to stop — stdout lines become blocking issues (30s timeout) |
 | `system/hooks/post-tick/*` | Scripts run after each tick (receives `{PREFIX}_TICK_STATUS`: `"normal"` or `"abnormal"`) |
@@ -138,7 +137,6 @@ The data repo is the agent's identity. The kernel reads config from it, writes s
 | Path | Purpose |
 |------|---------|
 | `system/state.json` | Tick count, timestamps |
-| `system/paused` | Created on fatal error (delete to resume) |
 | `system/logs/tick-NNN.jsonl` | Per-tick SDK transcript |
 | `system/logs/sessions/` | Archived TTY scrollbacks |
 | `tmp/sessions/` | Live TTY state (wiped each tick) |

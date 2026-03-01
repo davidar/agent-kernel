@@ -1,7 +1,7 @@
-"""Watcher — polls for triggers and runs agent ticks.
+"""Watcher — polls for trigger files and runs agent ticks.
 
-This is the system's heartbeat: watches for trigger files and schedule
-wakes, runs ticks, and manages crash notifications.
+This is the system's heartbeat: watches for trigger files, runs ticks,
+and manages crash notifications.
 """
 
 import asyncio
@@ -16,7 +16,6 @@ from .config import data_dir, ensure_dirs, get_container_name, get_state
 from .container import ensure_ready
 from .logging_config import setup_process_logging, get_logger
 from .notifications import send_crash_notification
-from .tools.schedule import get_pending_wakes, mark_wake_fulfilled, cleanup_old_wakes
 
 logger = get_logger(__name__)
 
@@ -61,46 +60,20 @@ def run_watcher(poll_interval: float = 2.0) -> None:
         logger.info("Cleaning up stale tmp/")
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
-    pause_logged = False
-
     while running:
         try:
-            # Check for manual trigger file
-            manual_trigger = trigger_file.exists()
+            # Check for trigger file
+            trigger = trigger_file.exists()
             trigger_reason = None
-            if manual_trigger:
+            if trigger:
                 try:
                     trigger_reason = trigger_file.read_text().strip()
                 except OSError:
                     pass
                 trigger_file.unlink(missing_ok=True)
 
-            # Check scheduled wakes
-            pending_wakes = get_pending_wakes()
-            scheduled_wake = None
-            if pending_wakes:
-                scheduled_wake = pending_wakes[0]
-                mark_wake_fulfilled(scheduled_wake["time"])
-                cleanup_old_wakes()
-
-            # Pause file prevents crash loops
-            pause_file = data_dir() / "system" / "paused"
-            if pause_file.exists():
-                if not pause_logged:
-                    logger.warning(f"Paused due to fatal error. Delete {pause_file} to resume.")
-                    pause_logged = True
-                time.sleep(poll_interval)
-                continue
-            else:
-                pause_logged = False
-
-            if manual_trigger or scheduled_wake:
-                if manual_trigger:
-                    logger.info(f"Tick triggered: {trigger_reason or 'manual'}")
-                elif scheduled_wake:
-                    reason = scheduled_wake.get("reason", "No reason")
-                    logger.info(f"Scheduled wake: {reason}")
-
+            if trigger:
+                logger.info(f"Tick triggered: {trigger_reason or 'manual'}")
                 logger.info("Starting tick...")
                 try:
                     run_agent()

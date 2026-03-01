@@ -24,11 +24,11 @@ The agent interacts with the world through **numbered terminal TTYs** in a conta
 - **Agent SDK**: Uses `claude-agent-sdk`, model configurable via `system/agent_config.json` (default: `claude-opus-4-6`)
 - **Stateless ticks**: Each tick starts with a fresh SDK session — no persistent context between ticks
 - **Context limit enforcement**: At ~70% (140K tokens), agent is told to wrap up. If compaction is about to fire, the PreCompact hook blocks it and ends the tick immediately.
-- **Watch mode**: `agent-kernel watch` auto-ticks on new messages
+- **Watch mode**: `agent-kernel watch` auto-ticks on trigger files
 - **Context tracking**: Parses SDK transcript (`~/.claude/projects/.../session.jsonl`) for real metrics
 - **Mid-tick notifications**: TickWatcher (`src/tick_watcher.py`) watches notification files, delivers via `client.query()`
 - **Per-tick transcript**: SDK session transcript copied to `system/logs/tick-NNN.jsonl` at tick end
-- **Error handling**: `ErrorDetector` (`src/errors.py`) classifies API errors. Transient errors retry with exponential backoff. Fatal errors create `system/paused` to prevent crash loops.
+- **Error handling**: `ErrorDetector` (`src/errors.py`) classifies API errors. Transient errors retry with exponential backoff. Fatal errors end the tick.
 
 **SDK mid-conversation injection:**
 - `client.query()` injects messages anytime during a session
@@ -79,8 +79,7 @@ src/
 └── tools/             # MCP tools (minimal surface)
     ├── __init__.py    # Server assembly — 5 tools
     ├── awareness.py   # login + tick-end conditions
-    ├── terminal.py    # open, type, wait, close
-    └── schedule.py    # Wake helpers (used by watcher)
+    └── terminal.py    # open, type, wait, close
 
 tests/
 ├── Containerfile.test      # Minimal test container (ubuntu + tmux + procps)
@@ -89,7 +88,6 @@ tests/
 ├── test_errors.py          # Error detection tests
 ├── test_hooks.py           # Hook runner tests
 ├── test_registry.py        # Instance registry tests
-├── test_schedule.py        # Wake scheduling tests
 ├── test_terminal_tools.py  # type/wait tool tests
 ├── test_tick_watcher.py    # Tick watcher tests
 ├── test_tty.py             # TTY manager tests
