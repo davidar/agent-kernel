@@ -5,24 +5,72 @@ and manages crash notifications.
 """
 
 import asyncio
-import shutil
+import json
 import signal
 import sys
 import time
 import traceback
 
 from .agent import main as run_agent
-from .config import data_dir, ensure_dirs, get_container_name, get_state
+from .config import data_dir, ensure_dirs, get_agent_config, get_container_name, get_state
 from .container import ensure_ready
+from .hooks import run_hooks
 from .logging_config import setup_process_logging, get_logger
 from .notifications import send_crash_notification
 
 logger = get_logger(__name__)
 
 
+def _recover_crashed_tick() -> None:
+    """If a previous tick crashed mid-way (live_status.json left behind), run post-tick hooks.
+
+    Must be called BEFORE ensure_dirs() since that wipes tmp/.
+    """
+    live_status_file = data_dir() / "tmp" / "live_status.json"
+    if not live_status_file.exists():
+        return
+
+    try:
+        status_data = json.loads(live_status_file.read_text())
+    except (OSError, json.JSONDecodeError):
+        logger.warning("Stale live_status.json found but unreadable, skipping recovery")
+        return
+
+    tick = status_data.get("tick")
+    logger.warning("Detected crashed tick %s (stale live_status.json) — running post-tick hooks", tick)
+
+    agent_config = get_agent_config()
+    hook_env_prefix = agent_config.get("hook_env_prefix", "AGENT")
+    container_name = get_container_name()
+
+    try:
+        asyncio.run(ensure_ready())
+    except Exception as e:
+        logger.error("Container startup failed during recovery: %s", e)
+        return
+
+    env = {
+        f"{hook_env_prefix}_TICK": str(tick or 0),
+        f"{hook_env_prefix}_TICK_DURATION": "",
+        f"{hook_env_prefix}_TICK_LOG": "",
+        f"{hook_env_prefix}_LAST_MESSAGE": "",
+        f"{hook_env_prefix}_SESSION_ID": "",
+        f"{hook_env_prefix}_TICK_STATUS": "abnormal",
+    }
+
+    try:
+        asyncio.run(run_hooks("post-tick", env, container=container_name))
+    except Exception as e:
+        logger.error("Post-tick recovery hooks failed: %s", e)
+
+
 def run_watcher(poll_interval: float = 2.0) -> None:
     """Main watcher loop — poll for triggers, run ticks."""
     setup_process_logging("watcher")
+
+    # Check for crashed tick before ensure_dirs() wipes tmp/
+    _recover_crashed_tick()
+
     ensure_dirs()
 
     # Start container immediately so daemons can run before first tick
@@ -53,12 +101,6 @@ def run_watcher(poll_interval: float = 2.0) -> None:
     logger.info(f"Tick count: {state.tick_count}")
     logger.info(f"Watching for triggers (poll every {poll_interval}s)")
     logger.info("Press Ctrl+C to stop")
-
-    # Clean up stale tmp/ from a previous crashed tick
-    tmp_dir = data_dir() / "tmp"
-    if tmp_dir.exists():
-        logger.info("Cleaning up stale tmp/")
-        shutil.rmtree(tmp_dir, ignore_errors=True)
 
     while running:
         try:

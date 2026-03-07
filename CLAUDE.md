@@ -41,7 +41,7 @@ Executable scripts in `system/hooks/` run at tick boundaries. This lets post-tic
 **Directories:**
 - `system/hooks/pre-tick/` — run after state update, before agent starts
 - `system/hooks/pre-stop/` — mid-tick validation when agent wants to stop. Stdout lines become blocking issues (fail-open: failures/timeouts produce no issues). 30s timeout.
-- `system/hooks/post-tick/` — run after transcript copied, before function returns
+- `system/hooks/post-tick/` — run after transcript copied, before function returns. Also run in the `finally` block on abnormal exits (KeyboardInterrupt, exceptions) and by the watcher on startup if a previous tick was hard-killed (detected via stale `live_status.json`).
 
 **Execution model:**
 - Executable scripts run in sorted order **inside the container** via `podman exec`

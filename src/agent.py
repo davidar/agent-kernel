@@ -231,6 +231,7 @@ async def run_tick():
     tick_active = True
 
     watcher: TickWatcher | None = None
+    post_tick_hooks_done = False
 
     try:
         async with ClaudeSDKClient(options=options) as client:
@@ -402,6 +403,7 @@ async def run_tick():
             },
             container=container_name,
         )
+        post_tick_hooks_done = True
 
         # Push data repo (best-effort, runs on host for SSH key access)
         if (data_dir() / ".git").is_dir():
@@ -432,14 +434,35 @@ async def run_tick():
 
         if err.fatal:
             logger.error("Fatal exception — tick will not retry")
-            return
-
-        raise
+            # fall through to finally (which runs post-tick hooks)
+        else:
+            raise
 
     finally:
         if watcher and watcher.running:
             await watcher.stop()
         await shutdown_tty_manager()
+
+        # Run post-tick hooks if they didn't run in the happy path
+        if not post_tick_hooks_done:
+            duration = (datetime.now() - tick_start).total_seconds()
+            logger.warning("Running post-tick hooks after abnormal exit")
+            try:
+                await run_hooks(
+                    "post-tick",
+                    {
+                        f"{hook_env_prefix}_TICK": str(tick_number),
+                        f"{hook_env_prefix}_TICK_DURATION": f"{duration:.1f}",
+                        f"{hook_env_prefix}_TICK_LOG": "",
+                        f"{hook_env_prefix}_LAST_MESSAGE": (last_assistant_text or "")[:2000],
+                        f"{hook_env_prefix}_SESSION_ID": tick_session_id,
+                        f"{hook_env_prefix}_TICK_STATUS": "abnormal",
+                    },
+                    container=container_name,
+                )
+            except Exception:
+                logger.warning("Post-tick hooks failed during cleanup", exc_info=True)
+
         # Wipe tmp/ so nothing lingers between ticks
         tmp_dir = data_dir() / "tmp"
         if tmp_dir.exists():
