@@ -127,7 +127,7 @@ ExecStart={kernel_bin} watch {name}
 ExecStopPost=podman stop --time 5 {container_name}
 Restart=always
 RestartSec=10
-KillMode=process
+MemoryMax=4G
 
 [Install]
 WantedBy=default.target
