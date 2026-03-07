@@ -195,6 +195,8 @@ async def create_container(
         "--name",
         container_name,
         "--systemd=always",
+        "--memory=1g",
+        "--memory-swap=1g",
         *volumes,
         "--workdir",
         f"{resolved}/sandbox",
