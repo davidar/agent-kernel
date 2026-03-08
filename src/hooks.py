@@ -11,7 +11,7 @@ from .notifications import send_crash_notification
 
 logger = get_logger(__name__)
 
-HOOK_TIMEOUT = 60  # seconds per script
+DEFAULT_HOOK_TIMEOUT = 60  # seconds per script
 
 
 def _discover_scripts(hook_type: str) -> list[Path]:
@@ -24,6 +24,22 @@ def _discover_scripts(hook_type: str) -> list[Path]:
         for p in hook_dir.iterdir()
         if p.is_file() and not p.name.startswith(".") and not p.name.endswith("~") and os.access(p, os.X_OK)
     )
+
+
+def _get_script_timeout(script: Path) -> int:
+    """Read timeout from a '# timeout: <seconds>' comment in the script, or use default."""
+    try:
+        with open(script) as f:
+            for line in f:
+                if line.startswith("#") and "timeout:" in line.lower():
+                    parts = line.split(":", 1)
+                    if len(parts) == 2:
+                        return int(parts[1].strip())
+                if not line.startswith("#") and line.strip():
+                    break  # stop after header comments
+    except (OSError, ValueError):
+        pass
+    return DEFAULT_HOOK_TIMEOUT
 
 
 def _build_env(env: dict[str, str]) -> dict[str, str]:
@@ -74,7 +90,7 @@ def _run_script(
         return None
 
 
-async def run_hooks(hook_type: str, env: dict[str, str], *, container: str, timeout: int = HOOK_TIMEOUT) -> None:
+async def run_hooks(hook_type: str, env: dict[str, str], *, container: str, timeout: int | None = None) -> None:
     """Run executable scripts from data_dir/system/hooks/{hook_type}/ in sorted order."""
     scripts = _discover_scripts(hook_type)
     if not scripts:
@@ -83,11 +99,12 @@ async def run_hooks(hook_type: str, env: dict[str, str], *, container: str, time
     full_env = _build_env(env)
 
     for script in scripts:
-        await asyncio.to_thread(_run_script, hook_type, script, full_env, timeout, container)
+        t = timeout if timeout is not None else _get_script_timeout(script)
+        await asyncio.to_thread(_run_script, hook_type, script, full_env, t, container)
 
 
 async def run_hooks_collect(
-    hook_type: str, env: dict[str, str], *, container: str, timeout: int = HOOK_TIMEOUT
+    hook_type: str, env: dict[str, str], *, container: str, timeout: int | None = None
 ) -> list[str]:
     """Run hook scripts and collect stdout lines from successful (exit 0) scripts.
 
@@ -101,7 +118,8 @@ async def run_hooks_collect(
     lines: list[str] = []
 
     for script in scripts:
-        result = await asyncio.to_thread(_run_script, hook_type, script, full_env, timeout, container)
+        t = timeout if timeout is not None else _get_script_timeout(script)
+        result = await asyncio.to_thread(_run_script, hook_type, script, full_env, t, container)
         if result is not None:
             for line in result.stdout.splitlines():
                 stripped = line.strip()

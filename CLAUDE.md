@@ -23,6 +23,7 @@ The agent interacts with the world through **numbered terminal TTYs** in a conta
 
 - **Agent SDK**: Uses `claude-agent-sdk`, model configurable via `system/agent_config.json` (default: `claude-opus-4-6`)
 - **Stateless ticks**: Each tick starts with a fresh SDK session — no persistent context between ticks
+- **Initial query override**: If `system/initial_query.md` exists, its contents are used as the tick's initial query (then deleted). Otherwise falls back to `initial_query` in `agent_config.json`. Lets post-tick hooks or external tooling direct the next tick.
 - **Context limit enforcement**: At ~70% (140K tokens), agent is told to wrap up. If compaction is about to fire, the PreCompact hook blocks it and ends the tick immediately.
 - **Watch mode**: `agent-kernel watch` auto-ticks on trigger files
 - **Context tracking**: Parses SDK transcript (`~/.claude/projects/.../session.jsonl`) for real metrics
@@ -49,7 +50,7 @@ Executable scripts in `system/hooks/` run at tick boundaries. This lets post-tic
 - Each script gets: `DATA_DIR`, `{PREFIX}_TICK` (always), plus `{PREFIX}_TICK_DURATION`, `{PREFIX}_TICK_LOG`, `{PREFIX}_LAST_MESSAGE`, `{PREFIX}_SESSION_ID`, `{PREFIX}_TICK_STATUS` (post-tick only)
 - `{PREFIX}_TICK_STATUS` is `"normal"` (agent ended cleanly) or `"abnormal"` (interrupted/compacted)
 - `{PREFIX}` is `hook_env_prefix` from config (default: `"AGENT"`)
-- 60s timeout (pre-tick/post-tick), 30s timeout (pre-stop). Failures logged, never fatal. Dotfiles and `~` backup files ignored.
+- Default 60s timeout per script, 30s for pre-stop. Scripts can override with a `# timeout: <seconds>` comment in the header. Explicit caller timeouts (e.g. pre-stop's 30s) take precedence. Failures logged, never fatal. Dotfiles and `~` backup files ignored.
 - After post-tick hooks, the kernel runs `git push` on the **host** (best-effort, needs host SSH keys)
 
 ### Logging (`src/logging_config.py`)

@@ -9,7 +9,7 @@ import pytest
 
 import src.config as config
 import src.registry as registry
-from src.hooks import run_hooks, run_hooks_collect
+from src.hooks import DEFAULT_HOOK_TIMEOUT, _get_script_timeout, run_hooks, run_hooks_collect
 from tests.conftest import _TEST_IMAGE, _ensure_test_image
 
 
@@ -100,6 +100,33 @@ def hook_env(hook_container, tmp_registry):
     hook_dir = data / "system" / "hooks" / "test-hook"
     hook_dir.mkdir(parents=True, exist_ok=True)
     return hook_dir, name
+
+
+class TestGetScriptTimeout:
+    def test_default_when_no_directive(self, tmp_path):
+        script = tmp_path / "hook"
+        _make_script(script, "#!/bin/bash\necho hello\n")
+        assert _get_script_timeout(script) == DEFAULT_HOOK_TIMEOUT
+
+    def test_parses_timeout_directive(self, tmp_path):
+        script = tmp_path / "hook"
+        _make_script(script, "#!/bin/bash\n# timeout: 120\necho hello\n")
+        assert _get_script_timeout(script) == 120
+
+    def test_stops_at_non_comment_line(self, tmp_path):
+        script = tmp_path / "hook"
+        _make_script(script, "#!/bin/bash\necho hello\n# timeout: 120\n")
+        assert _get_script_timeout(script) == DEFAULT_HOOK_TIMEOUT
+
+    def test_case_insensitive(self, tmp_path):
+        script = tmp_path / "hook"
+        _make_script(script, "#!/bin/bash\n# Timeout: 30\necho hello\n")
+        assert _get_script_timeout(script) == 30
+
+    def test_invalid_value_returns_default(self, tmp_path):
+        script = tmp_path / "hook"
+        _make_script(script, "#!/bin/bash\n# timeout: notanumber\necho hello\n")
+        assert _get_script_timeout(script) == DEFAULT_HOOK_TIMEOUT
 
 
 class TestRunHooks:

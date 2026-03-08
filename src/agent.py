@@ -244,8 +244,16 @@ async def run_tick():
             watcher = TickWatcher(notify_callback=_notify_and_interrupt)
             await watcher.start()
 
-            initial_query = agent_config.get("initial_query", "Tick {tick} starting. Call login() to begin.")
-            await client.query(initial_query.format(tick=tick_number, data_dir=data_dir()))
+            # Check for a file-based initial query (e.g. written by a post-tick hook)
+            initial_query_file = data_dir() / "system" / "initial_query.md"
+            if initial_query_file.exists():
+                initial_query = initial_query_file.read_text().strip()
+                initial_query_file.unlink()
+                logger.info("Using initial query from %s", initial_query_file.name)
+            else:
+                initial_query = agent_config.get("initial_query", "Tick {tick} starting. Call login() to begin.")
+                initial_query = initial_query.format(tick=tick_number, data_dir=data_dir())
+            await client.query(initial_query)
 
             message_iter = client.receive_messages().__aiter__()
             while True:
