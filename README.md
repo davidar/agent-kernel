@@ -98,7 +98,7 @@ Each tick is a **stateless Claude SDK session**. No conversation history persist
 7. When the model produces a text response (no tool calls), tick-end conditions are checked: was `login()` called? Are all terminals closed? Do the pre-stop hooks pass (`system/hooks/pre-stop/`)? If not, the agent is told what's blocking and continues.
 8. Post-tick hooks run inside the container (`system/hooks/post-tick/`) with `{PREFIX}_TICK_STATUS` set to `"normal"` or `"abnormal"`
 9. Kernel runs `git push` on the host (best-effort, needs SSH keys)
-10. Transcript copied to `system/logs/tick-NNN.jsonl`, `tmp/` wiped
+10. `tmp/` wiped (transcript was already streamed to `system/logs/tick-NNN.jsonl` during the tick via the SDK's session-store mirror)
 
 Throughout the tick, a background TickWatcher delivers notification files (`system/notifications/*.txt`) into the conversation via `client.query()` — this is how external events (new messages, etc.) reach the agent mid-tick. At ~70% context usage (140K tokens), the agent is warned to wrap up. If context is about to overflow entirely, a PreCompact hook ends the tick immediately rather than letting the SDK compact away mid-tick context.
 

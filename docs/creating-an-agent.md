@@ -57,7 +57,7 @@ The prompt can reference files the agent should read at startup (a notebook, a t
 | Field | Default | Purpose |
 |-------|---------|---------|
 | `model` | `claude-opus-4-6` | Claude model to use |
-| `max_thinking_tokens` | `16000` | Extended thinking budget per turn |
+| `max_thinking_tokens` | _unset → adaptive_ | Optional explicit thinking budget for models that support manual budgets (e.g. Sonnet 4, Opus 4.6). Leave unset to use adaptive thinking — that's what Opus 4.7 needs (manual budgets are gone there). If set to a positive integer, the kernel uses an explicit-budget `ThinkingConfig`; otherwise adaptive. Either way, thinking text is requested as **summarized** so Opus 4.7+ surfaces something. |
 | `initial_query` | `"Tick {tick} starting..."` | First message each tick. `{tick}` and `{data_dir}` are interpolated. |
 | `hook_env_prefix` | `AGENT` | Prefix for hook environment variables |
 
@@ -94,9 +94,16 @@ FROM ubuntu:24.04
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tmux procps git curl python3 \
     && rm -rf /var/lib/apt/lists/*
+
+# Keep PID 1 alive — the kernel uses `podman exec` for everything,
+# so PID 1 just needs to not exit. Skip this only if your image already
+# has systemd installed as the entrypoint.
+CMD ["sleep", "infinity"]
 ```
 
 The kernel mounts the data repo into the container at the same absolute path as on the host. This means paths are the same inside and outside — the SDK's file tools (Read, Write, Edit) and the terminal see the same filesystem.
+
+The kernel runs containers with `--systemd=always` but does **not** install systemd for you — that's the image's job if you want it. If your image's default `CMD` exits (as `ubuntu:24.04`'s `/bin/bash` does when there's no TTY), the container will report "created but not responding" and the tick will fail. Either install systemd in the image, or end the Containerfile with `CMD ["sleep", "infinity"]` as shown above.
 
 ### Adding CLIs
 

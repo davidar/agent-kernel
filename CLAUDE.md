@@ -24,11 +24,11 @@ The agent interacts with the world through **numbered terminal TTYs** in a conta
 - **Agent SDK**: Uses `claude-agent-sdk`, model configurable via `system/agent_config.json` (default: `claude-opus-4-6`)
 - **Stateless ticks**: Each tick starts with a fresh SDK session — no persistent context between ticks
 - **Initial query override**: If `system/initial_query.md` exists, its contents are used as the tick's initial query (then deleted). Otherwise falls back to `initial_query` in `agent_config.json`. Lets post-tick hooks or external tooling direct the next tick.
-- **Context limit enforcement**: At ~70% (140K tokens), agent is told to wrap up. If compaction is about to fire, the PreCompact hook blocks it and ends the tick immediately.
+- **Context limit enforcement**: At ~70% of context, agent is told to wrap up. If compaction is about to fire, the PreCompact hook blocks it and ends the tick immediately.
 - **Watch mode**: `agent-kernel watch` auto-ticks on trigger files
-- **Context tracking**: Parses SDK transcript (`~/.claude/projects/.../session.jsonl`) for real metrics
+- **Context tracking**: `client.get_context_usage()` — SDK-provided breakdown matching the CLI `/context` command. No transcript parsing.
 - **Mid-tick notifications**: TickWatcher (`src/tick_watcher.py`) watches notification files, delivers via `client.query()`
-- **Per-tick transcript**: SDK session transcript copied to `system/logs/tick-NNN.jsonl` at tick end
+- **Per-tick transcript**: `TickJsonlStore` (`src/session_store.py`) streams transcript frames to `system/logs/tick-NNN.jsonl` live during the tick via the SDK's `session_store` option — no post-tick copy from `~/.claude/projects/`.
 - **Error handling**: `ErrorDetector` (`src/errors.py`) classifies API errors. Transient errors retry with exponential backoff. Fatal errors end the tick.
 
 **SDK mid-conversation injection:**
@@ -56,7 +56,7 @@ Executable scripts in `system/hooks/` run at tick boundaries. This lets post-tic
 ### Logging (`src/logging_config.py`)
 
 - Rotating log files: `system/logs/{process}.log` (daily, 14 days) + `{process}-current.log` (5MB)
-- Per-tick transcripts: `system/logs/tick-NNN.jsonl` (SDK transcript copy)
+- Per-tick transcripts: `system/logs/tick-NNN.jsonl` (streamed live by `TickJsonlStore` — see `src/session_store.py`)
 - Usage: `setup_process_logging("watcher")` at entry point, `logger = get_logger(__name__)` in modules
 - Console output goes to stderr with immediate flush
 
@@ -64,7 +64,7 @@ Executable scripts in `system/hooks/` run at tick boundaries. This lets post-tic
 
 ```
 src/
-├── agent.py           # Tick loop, SDK client, error handling, transcript copy
+├── agent.py           # Tick loop, SDK client, error handling
 ├── cli.py             # Host CLI (agent-kernel <cmd> <name>)
 ├── config.py          # init()/data_dir()/instance_name() accessor, state helpers, agent_config
 ├── container.py       # Container management (build, start, exec)
@@ -72,8 +72,8 @@ src/
 ├── hooks.py           # Hook runner (pre-tick, pre-stop, post-tick)
 ├── logging_config.py  # Rotating log files, journalctl output
 ├── registry.py        # Instance registry (name → path mapping)
+├── session_store.py   # TickJsonlStore — streams per-tick transcript via SDK session_store
 ├── tick_watcher.py    # Mid-tick notification delivery (inotify + polling)
-├── transcript.py      # SDK transcript parser (context metrics)
 ├── tty.py             # TTY manager (tmux sessions, capture loop, diff tracking)
 ├── types.py           # Data models (State)
 ├── watcher.py         # Poll-and-tick loop, crash notifications
@@ -86,9 +86,11 @@ tests/
 ├── Containerfile.test      # Minimal test container (ubuntu + tmux + procps)
 ├── conftest.py             # Fixtures (ephemeral test containers, data_dir)
 ├── test_config.py          # Config module tests
+├── test_container.py       # Container management tests
 ├── test_errors.py          # Error detection tests
 ├── test_hooks.py           # Hook runner tests
 ├── test_registry.py        # Instance registry tests
+├── test_session_store.py   # TickJsonlStore adapter tests
 ├── test_terminal_tools.py  # type/wait tool tests
 ├── test_tick_watcher.py    # Tick watcher tests
 ├── test_tty.py             # TTY manager tests

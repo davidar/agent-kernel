@@ -11,7 +11,7 @@ version = "0.1.0"
 description = "Portable runtime for persistent Claude agents"
 requires-python = ">=3.10"
 dependencies = [
-    "claude-agent-sdk>=0.1.39",
+    "claude-agent-sdk>=0.1.67",
     "typing_extensions>=4.0.0",
     "watchfiles>=1.0.0",
 ]

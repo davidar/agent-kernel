@@ -16,7 +16,7 @@ from claude_agent_sdk import (
     ResultMessage,
     HookMatcher,
 )
-from claude_agent_sdk.types import HookJSONOutput, SystemMessage
+from claude_agent_sdk.types import ContextUsageResponse, HookJSONOutput, ThinkingConfig
 
 from .config import data_dir, ensure_dirs, get_container_name, get_state, save_state, get_agent_config
 from .container import ensure_ready
@@ -32,29 +32,8 @@ from .hooks import run_hooks, run_hooks_collect
 from .tick_watcher import TickWatcher
 from .tty import init_tty_manager, shutdown_tty_manager
 from .errors import ErrorDetector
-from .transcript import parse_transcript_metrics, get_transcript_path
+from .session_store import TickJsonlStore
 from collections.abc import Callable
-
-# Monkey-patch SDK message parser to handle unknown message types gracefully.
-# claude-agent-sdk 0.1.39 raises MessageParseError on unknown types (e.g. "rate_limit_event")
-# inside an async generator, which kills the session permanently.
-# See: anthropics/claude-agent-sdk-python#583
-import claude_agent_sdk._internal.message_parser as _mp  # noqa: E402
-
-_original_parse = _mp.parse_message
-
-
-def _patched_parse(data):
-    try:
-        return _original_parse(data)
-    except Exception as e:
-        if "Unknown message type" in str(e):
-            logging.getLogger(__name__).debug(f"Ignoring unknown message type: {data.get('type', '?')}")
-            return SystemMessage(subtype="unknown", data=data)
-        raise
-
-
-_mp.parse_message = _patched_parse
 
 # Logger is configured lazily - either by main() or by watcher
 logger = get_logger(__name__)
@@ -117,22 +96,6 @@ def _get_system_prompt() -> str:
     return _cached_prompt
 
 
-def _copy_tick_transcript(session_id: str, tick_number: int) -> Path | None:
-    """Copy the SDK session transcript to per-tick log directory."""
-    if not session_id:
-        return None
-    src = get_transcript_path(session_id)
-    if not src:
-        return None
-    dst = data_dir() / "system" / "logs" / f"tick-{tick_number:03d}.jsonl"
-    try:
-        shutil.copy2(src, dst)
-        return dst
-    except OSError as e:
-        logger.warning("Failed to copy transcript: %s", e)
-        return None
-
-
 async def run_tick():
     """Run a single agent tick."""
     ensure_dirs()
@@ -165,6 +128,11 @@ async def run_tick():
 
     reset_tick_state()
 
+    # Per-tick transcript file. The TickJsonlStore writes here as frames stream
+    # in, so we never have to reach into ~/.claude/projects/ to read the
+    # transcript (the SDK still writes its own copy there).
+    tick_log_path = logs_dir / f"tick-{tick_number:03d}.jsonl"
+
     # Start container before hooks so they run inside it
     container_name = get_container_name()
     build_error = await ensure_ready()
@@ -183,11 +151,29 @@ async def run_tick():
         nonlocal context_limit_hit
         context_limit_hit = True
 
+    # Thinking config: default to adaptive + summarized display. If the
+    # data repo sets an explicit `max_thinking_tokens`, honor it via the
+    # "enabled" mode (works on models that still support manual budgets;
+    # Opus 4.7 ignores the budget but the request itself is fine).
+    # `display: "summarized"` is what Opus 4.7+ needs to return any
+    # thinking text at all and is harmless on older models.
+    thinking_cfg: ThinkingConfig
+    budget = agent_config.get("max_thinking_tokens")
+    if isinstance(budget, int) and budget > 0:
+        thinking_cfg = {
+            "type": "enabled",
+            "budget_tokens": budget,
+            "display": "summarized",
+        }
+    else:
+        thinking_cfg = {"type": "adaptive", "display": "summarized"}
+
     options = ClaudeAgentOptions(
         model=agent_config["model"],
         system_prompt=prompt,
         mcp_servers={server_name: agent_server},
-        max_thinking_tokens=agent_config["max_thinking_tokens"],
+        thinking=thinking_cfg,
+        session_store=TickJsonlStore(tick_log_path),
         allowed_tools=[f"{mcp_prefix}{t.name}" for t in AGENT_TOOLS]
         + [
             "Read",
@@ -228,7 +214,11 @@ async def run_tick():
     context_warning_sent = False
     last_assistant_text = ""
     tick_session_id = ""  # captured from init message
+    last_context_usage: ContextUsageResponse | None = None
     tick_active = True
+
+    # Context warning threshold — agent is told to wrap up beyond this.
+    CONTEXT_WARN_PERCENT = 70.0
 
     watcher: TickWatcher | None = None
     post_tick_hooks_done = False
@@ -297,19 +287,31 @@ async def run_tick():
                             short_tool = block.name.replace(mcp_prefix, "")
                             _write_live_status(f"Tick {tick_number}: {short_tool}", tick=tick_number, tool=short_tool)
 
-                    # Context approaching limit — tell agent to wrap up
-                    if not context_warning_sent and tick_session_id:
-                        metrics = parse_transcript_metrics(tick_session_id)
-                        context_tokens = metrics.get("context_tokens", 0)
-                        if context_tokens >= 140000:
-                            context_warning_sent = True
-                            usage_pct = (context_tokens / 200000) * 100
-                            logger.warning("Context at %.0f%% — telling agent to wrap up", usage_pct)
-                            await client.query(
-                                f"Context at {usage_pct:.0f}% ({context_tokens:,} tokens). "
-                                "Wrap up now — save your work, close TTYs, and end the tick. "
-                                "The tick will be forcibly terminated if context fills up."
-                            )
+                    # Context approaching limit — tell agent to wrap up.
+                    # Use the SDK's get_context_usage() instead of parsing the
+                    # transcript file ourselves; it's the same data the CLI's
+                    # /context command shows.
+                    try:
+                        last_context_usage = await client.get_context_usage()
+                    except Exception as e:
+                        logger.debug("get_context_usage() failed: %s", e)
+                        last_context_usage = None
+
+                    if (
+                        not context_warning_sent
+                        and last_context_usage is not None
+                        and last_context_usage["percentage"] >= CONTEXT_WARN_PERCENT
+                    ):
+                        context_warning_sent = True
+                        pct = last_context_usage["percentage"]
+                        used = last_context_usage["totalTokens"]
+                        cap = last_context_usage["maxTokens"]
+                        logger.warning("Context at %.0f%% — telling agent to wrap up", pct)
+                        await client.query(
+                            f"Context at {pct:.0f}% ({used:,}/{cap:,} tokens). "
+                            "Wrap up now — save your work, close TTYs, and end the tick. "
+                            "The tick will be forcibly terminated if context fills up."
+                        )
 
                 elif isinstance(message, ResultMessage):
                     # Error detection: ResultMessage.is_error
@@ -381,17 +383,19 @@ async def run_tick():
         state.last_tick_end = tick_end.isoformat()
         save_state(state)
 
-        # Copy SDK transcript to per-tick log
-        transcript_path = _copy_tick_transcript(tick_session_id, tick_number)
+        # The TickJsonlStore has been streaming entries to tick_log_path during
+        # the tick; if no frames arrived (e.g. very early failure) the file
+        # will not exist.
+        transcript_path = tick_log_path if tick_log_path.exists() else None
 
-        # Log usage summary
+        # Log usage summary from the last get_context_usage() snapshot we took
+        # inside the loop (the client is closed by now, so we can't ask again).
         usage_info = ""
-        if tick_session_id:
-            metrics = parse_transcript_metrics(tick_session_id)
-            if metrics:
-                ctx = metrics.get("context_tokens", 0)
-                pct = (ctx / 200000) * 100 if ctx else 0
-                usage_info = f" | Context: {pct:.0f}% ({ctx:,}/200,000)"
+        if last_context_usage is not None:
+            ctx = last_context_usage["totalTokens"]
+            cap = last_context_usage["maxTokens"]
+            pct = last_context_usage["percentage"]
+            usage_info = f" | Context: {pct:.0f}% ({ctx:,}/{cap:,})"
 
         logger.info("=" * 60)
         logger.info("TICK %d COMPLETE (%.1fs)%s", tick_number, duration, usage_info)
